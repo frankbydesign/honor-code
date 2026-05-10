@@ -1,11 +1,32 @@
-<main class="container">
-  <h1>Honor Code</h1>
-  @if (!auth.hasChecked()) {
-    <p>Loading…</p>
-  } @else if (auth.isAuthenticated()) {
-    <p>Signed in as {{ auth.currentUser()?.email }}.</p>
-  } @else {
-    <p>Not signed in.</p>
-    <button type="button" (click)="login()">Sign in with Google</button>
-  }
-</main>
+@if (!auth.hasChecked()) {
+  <div class="centered">
+    <h1>Honor Code</h1>
+    <p class="muted">Loading…</p>
+  </div>
+} @else if (auth.isAuthenticated()) {
+  <div class="shell">
+    <header class="shell-header">
+      <h1>Honor Code</h1>
+      <div class="shell-user">
+        <span class="email">{{ auth.currentUser()?.email }}</span>
+        <button type="button" (click)="logout()">Sign out</button>
+      </div>
+    </header>
+    <main class="shell-main">
+      <p class="muted">Nothing here yet.</p>
+    </main>
+  </div>
+} @else {
+  <main class="centered">
+    <h1>Honor Code</h1>
+    <p class="muted">Track the commitments you make on calls.</p>
+    <button
+      type="button"
+      class="primary"
+      [disabled]="auth.loginInProgress()"
+      (click)="login()"
+    >
+      Sign in with Google
+    </button>
+  </main>
+}

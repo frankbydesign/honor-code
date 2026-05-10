@@ -1,0 +1,103 @@
+:host {
+  display: block;
+  min-height: 100vh;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  color: #1a1a1a;
+}
+
+h1 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.muted {
+  color: #6b6b6b;
+  margin: 0;
+}
+
+.centered {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  text-align: center;
+}
+
+.centered h1 {
+  font-size: 1.75rem;
+}
+
+button {
+  font: inherit;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: 1px solid #d4d4d4;
+  background: white;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: #f5f5f5;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+button.primary {
+  margin-top: 0.25rem;
+  padding: 0.625rem 1.25rem;
+  font-weight: 500;
+  background: #1a1a1a;
+  color: white;
+  border-color: #1a1a1a;
+}
+
+button.primary:hover:not(:disabled) {
+  background: #333;
+}
+
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.shell-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.shell-header h1 {
+  font-size: 1.125rem;
+}
+
+.shell-user {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.shell-user .email {
+  color: #4b4b4b;
+}
+
+.shell-main {
+  flex: 1;
+  padding: 2rem 1.25rem;
+}

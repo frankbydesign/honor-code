@@ -8,6 +8,9 @@ must come from the environment.
 from __future__ import annotations
 
 import os
+import re
+
+from app.auth.origins import compile_patterns, parse_patterns_env
 
 
 def _required(name: str) -> str:
@@ -58,6 +61,18 @@ for _origin in FRONTEND_ORIGINS:
             f"FRONTEND_ORIGINS entry {_origin!r} must be a full origin "
             "like https://example.com (no path, no trailing slash)"
         )
+
+# Glob patterns layered on top of the FRONTEND_ORIGINS exact list. `*`
+# is the only wildcard. Used to allow Vercel Preview URLs whose host
+# names change per deployment. Empty/unset means "no patterns" — the
+# system then behaves identically to the pre-pattern config.
+_raw_frontend_origin_patterns = os.environ.get("FRONTEND_ORIGINS_PATTERNS", "")
+FRONTEND_ORIGINS_PATTERNS: tuple[str, ...] = parse_patterns_env(
+    _raw_frontend_origin_patterns
+)
+FRONTEND_ORIGINS_PATTERN_REGEX: re.Pattern[str] | None = compile_patterns(
+    FRONTEND_ORIGINS_PATTERNS
+)
 
 SESSION_COOKIE_NAME = "honor_code_session"
 SESSION_TTL_DAYS = 30

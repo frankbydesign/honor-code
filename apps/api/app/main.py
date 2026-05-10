@@ -13,12 +13,18 @@ from app.security import token_crypto  # noqa: F401  (validates ENCRYPTION_KEY)
 
 app = FastAPI(title="Honor Code API")
 
-# Explicit allowlist; no wildcards. allow_credentials=True is required so
-# the browser sends the honor_code_session cookie on cross-origin fetches
-# from the Vercel frontends.
+# Explicit allowlist plus an optional glob-pattern layer (used for
+# Vercel Preview URLs). Starlette's CORSMiddleware tries the exact
+# list first, then re.fullmatch against allow_origin_regex, so the
+# combined behavior matches our `?next=` validator.
+# allow_credentials=True is required so the browser sends the
+# honor_code_session cookie on cross-origin fetches from the
+# Vercel frontends.
+_pattern_regex = auth_config.FRONTEND_ORIGINS_PATTERN_REGEX
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(auth_config.FRONTEND_ORIGINS),
+    allow_origin_regex=_pattern_regex.pattern if _pattern_regex is not None else None,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type"],

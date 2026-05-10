@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import config, sessions
 from app.auth.deps import get_current_user
 from app.auth.oauth import oauth
+from app.auth.origins import origin_matches
 from app.db.models import User
 from app.db.session import get_session
 
@@ -31,8 +32,9 @@ def _validate_next_url(next_url: str) -> str | None:
     """Return a sanitized next URL if its origin is in the allowlist.
 
     Path/query/fragment are preserved; only the origin (scheme+host+port)
-    is matched against FRONTEND_ORIGINS. Returns None for anything
-    malformed or not allowlisted — callers treat None as "fall back".
+    is matched against FRONTEND_ORIGINS and FRONTEND_ORIGINS_PATTERNS.
+    Returns None for anything malformed or not allowlisted — callers
+    treat None as "fall back".
     """
     try:
         parts = urlsplit(next_url)
@@ -40,10 +42,17 @@ def _validate_next_url(next_url: str) -> str | None:
         return None
     if not parts.scheme or not parts.netloc:
         return None
-    origin = f"{parts.scheme}://{parts.netloc}"
-    if origin not in config.FRONTEND_ORIGINS:
+    # Reject userinfo — `https://allowed.example.com@evil.com/` parses
+    # to a netloc that includes `@evil.com`, and a permissive `*` in a
+    # pattern could span the `@`. The browser would then navigate to
+    # the post-`@` host. Easiest to refuse the whole URL.
+    if "@" in parts.netloc:
         return None
-    # Reconstruct from parsed parts to drop anything weird (e.g. userinfo).
+    origin = f"{parts.scheme}://{parts.netloc}"
+    if not origin_matches(
+        origin, config.FRONTEND_ORIGINS, config.FRONTEND_ORIGINS_PATTERN_REGEX
+    ):
+        return None
     return urlunsplit(
         (parts.scheme, parts.netloc, parts.path, parts.query, parts.fragment)
     )
