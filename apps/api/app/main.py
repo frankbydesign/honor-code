@@ -1,10 +1,29 @@
 from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.middleware.sessions import SessionMiddleware
 
+# Importing these modules at startup is what makes the app fail fast if
+# SESSION_SECRET or ENCRYPTION_KEY (or the other required vars) are missing.
+from app.auth import config as auth_config
+from app.auth.router import router as auth_router
 from app.db.session import get_session
+from app.security import token_crypto  # noqa: F401  (validates ENCRYPTION_KEY)
 
 app = FastAPI(title="Honor Code API")
+
+# Authlib stashes the OAuth state parameter in this signed cookie between
+# /login and /callback. Distinct cookie name from the app session.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=auth_config.SESSION_SECRET,
+    session_cookie=auth_config.OAUTH_STATE_COOKIE_NAME,
+    same_site="lax",
+    https_only=True,
+    max_age=10 * 60,
+)
+
+app.include_router(auth_router)
 
 
 @app.get("/health")

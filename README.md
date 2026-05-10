@@ -17,11 +17,32 @@ This repository is a monorepo containing:
 
 ## Run the API locally
 
-The API needs `DATABASE_URL` in its environment. Pass it inline or export it in your shell:
+The API needs the following in its environment:
+
+- `DATABASE_URL` — Postgres URL from Railway
+- `SESSION_SECRET` — at least 32 bytes of random data, used to sign session cookies and the transient OAuth state cookie
+- `ENCRYPTION_KEY` — a Fernet key, used to encrypt OAuth tokens at rest
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — OAuth credentials from Google Cloud Console
+- `ALLOWED_EMAILS` — comma- or whitespace-separated list of Google account emails permitted to log in (case-insensitive)
+- `OAUTH_REDIRECT_URI` *(optional)* — the exact callback URL registered with Google. If unset, the app derives one from the incoming request, which only works if the proxy headers are trustworthy. On Railway, set it explicitly.
+
+Generate the two secrets like this:
 
 ```bash
 cd apps/api
-DATABASE_URL='postgresql://...' uv run uvicorn app.main:app --reload
+uv run python -c 'import secrets; print(secrets.token_urlsafe(48))'                # SESSION_SECRET
+uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'  # ENCRYPTION_KEY
+```
+
+The app refuses to start if any required variable is missing or malformed. Then run it:
+
+```bash
+cd apps/api
+DATABASE_URL='postgresql://...' \
+  SESSION_SECRET='...' ENCRYPTION_KEY='...' \
+  GOOGLE_CLIENT_ID='...' GOOGLE_CLIENT_SECRET='...' \
+  ALLOWED_EMAILS='you@example.com' \
+  uv run uvicorn app.main:app --reload
 ```
 
 The API listens on http://localhost:8000. Verify with:
@@ -33,6 +54,16 @@ curl http://localhost:8000/health
 
 If the database is unreachable, `/health` returns HTTP 503 with
 `{"detail":{"status":"error","database":"unreachable"}}`. The connection string is never echoed in the response or logged.
+
+### Testing the Google OAuth flow
+
+Register `http://localhost:8000/auth/google/callback` as an authorized redirect URI in Google Cloud Console (or use your Railway URL for production). Then in a browser:
+
+1. Open `http://localhost:8000/auth/google/login` — you'll land on Google's consent screen.
+2. Sign in with an email listed in `ALLOWED_EMAILS`. Google sends you back to `/auth/google/callback`, the API sets a `honor_code_session` cookie, and you're redirected to `/auth/me`, which returns your email and display name.
+3. Hitting `/auth/me` from a fresh browser (no cookie) returns 401. Tampering with the cookie also returns 401 and logs a warning.
+4. `POST /auth/logout` clears the cookie and deletes the session row; `/auth/me` then returns 401 again.
+5. Signing in with an email not in `ALLOWED_EMAILS` is rejected with 403 at the callback; no user row is created.
 
 ## Database migrations (Alembic)
 
@@ -85,7 +116,9 @@ honor-code/
 ├── apps/
 │   ├── api/        # FastAPI app
 │   │   ├── app/
-│   │   │   ├── db/     # SQLAlchemy engine, session, models
+│   │   │   ├── auth/      # Google OAuth + session cookies
+│   │   │   ├── db/        # SQLAlchemy engine, session, models
+│   │   │   ├── security/  # token encryption helpers (Fernet)
 │   │   │   └── main.py
 │   │   ├── alembic/    # migration environment + versions
 │   │   └── alembic.ini
