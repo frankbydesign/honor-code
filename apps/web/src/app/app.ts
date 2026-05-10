@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { AuthService } from './auth.service';
 
 @Component({
@@ -8,7 +8,6 @@ import { AuthService } from './auth.service';
   styleUrl: './app.css',
 })
 export class App implements OnInit {
-  protected readonly title = signal('Honor Code');
   protected readonly auth = inject(AuthService);
 
   ngOnInit(): void {
@@ -17,5 +16,9 @@ export class App implements OnInit {
 
   protected login(): void {
     this.auth.login();
+  }
+
+  protected logout(): void {
+    this.auth.logout();
   }
 }
