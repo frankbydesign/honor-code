@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from urllib.parse import urlsplit, urlunsplit
 
 from authlib.integrations.base_client import OAuthError
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,9 +22,50 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# Key used to round-trip the post-login redirect target through Authlib's
+# session cookie alongside Authlib's own state entry.
+_NEXT_URL_SESSION_KEY = "post_login_next_url"
+
+
+def _validate_next_url(next_url: str) -> str | None:
+    """Return a sanitized next URL if its origin is in the allowlist.
+
+    Path/query/fragment are preserved; only the origin (scheme+host+port)
+    is matched against FRONTEND_ORIGINS. Returns None for anything
+    malformed or not allowlisted — callers treat None as "fall back".
+    """
+    try:
+        parts = urlsplit(next_url)
+    except ValueError:
+        return None
+    if not parts.scheme or not parts.netloc:
+        return None
+    origin = f"{parts.scheme}://{parts.netloc}"
+    if origin not in config.FRONTEND_ORIGINS:
+        return None
+    # Reconstruct from parsed parts to drop anything weird (e.g. userinfo).
+    return urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, parts.query, parts.fragment)
+    )
+
 
 @router.get("/google/login")
-async def google_login(request: Request):
+async def google_login(
+    request: Request,
+    next: str | None = Query(default=None),
+):
+    if next is not None:
+        validated = _validate_next_url(next)
+        if validated is None:
+            logger.warning("rejected login with disallowed next url")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="next url not in allowlist",
+            )
+        request.session[_NEXT_URL_SESSION_KEY] = validated
+    else:
+        request.session.pop(_NEXT_URL_SESSION_KEY, None)
+
     redirect_uri = config.OAUTH_REDIRECT_URI or str(
         request.url_for("auth_google_callback")
     )
@@ -91,7 +133,19 @@ async def google_callback(
         ip_address=ip,
     )
 
-    response = RedirectResponse(url="/auth/me", status_code=status.HTTP_303_SEE_OTHER)
+    # Pop the next-url that was stashed during /google/login. Re-validate
+    # because the allowlist may have changed between login and callback,
+    # and to defend against any future bug that lets a bad value sneak in.
+    raw_next = request.session.pop(_NEXT_URL_SESSION_KEY, None)
+    redirect_target = "/auth/me"
+    if raw_next:
+        validated = _validate_next_url(raw_next)
+        if validated is not None:
+            redirect_target = validated
+
+    response = RedirectResponse(
+        url=redirect_target, status_code=status.HTTP_303_SEE_OTHER
+    )
     sessions.set_session_cookie(response, session_row.id)
     return response
 
