@@ -40,6 +40,25 @@ if not ALLOWED_EMAILS:
 # the safer choice on Railway (proxy headers can lie).
 OAUTH_REDIRECT_URI: str | None = os.environ.get("OAUTH_REDIRECT_URI") or None
 
+# Frontend origins permitted to (a) make credentialed CORS requests and
+# (b) be used as the post-login `?next=` redirect target. Comma- or
+# whitespace-separated. Each entry must be a full origin
+# (scheme://host[:port]) with no path or trailing slash.
+_raw_frontend_origins = _required("FRONTEND_ORIGINS")
+FRONTEND_ORIGINS: tuple[str, ...] = tuple(
+    o.strip().rstrip("/")
+    for o in _raw_frontend_origins.replace(",", " ").split()
+    if o.strip()
+)
+if not FRONTEND_ORIGINS:
+    raise RuntimeError("FRONTEND_ORIGINS is set but contains no origins")
+for _origin in FRONTEND_ORIGINS:
+    if "://" not in _origin:
+        raise RuntimeError(
+            f"FRONTEND_ORIGINS entry {_origin!r} must be a full origin "
+            "like https://example.com (no path, no trailing slash)"
+        )
+
 SESSION_COOKIE_NAME = "honor_code_session"
 SESSION_TTL_DAYS = 30
 

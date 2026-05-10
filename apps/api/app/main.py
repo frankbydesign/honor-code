@@ -1,4 +1,5 @@
 from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
@@ -11,6 +12,17 @@ from app.db.session import get_session
 from app.security import token_crypto  # noqa: F401  (validates ENCRYPTION_KEY)
 
 app = FastAPI(title="Honor Code API")
+
+# Explicit allowlist; no wildcards. allow_credentials=True is required so
+# the browser sends the honor_code_session cookie on cross-origin fetches
+# from the Vercel frontends.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(auth_config.FRONTEND_ORIGINS),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
+)
 
 # Authlib stashes the OAuth state parameter in this signed cookie between
 # /login and /callback. Distinct cookie name from the app session.
