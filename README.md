@@ -1,128 +1,88 @@
 # Honor Code
 
-A personal app to track commitments extracted from Fathom transcripts (and, eventually, Gmail).
+A personal app for keeping track of the commitments I make on calls and in
+email, and following through on them. It reads Fathom transcripts now and will
+read Gmail later. It runs on my own machine: one SQLite file, Google sign-in,
+nothing hosted.
 
-This repository is a monorepo containing:
+The repo is a monorepo. `apps/api` is the FastAPI backend, `apps/web` is the
+Angular frontend, `docs/` is notes.
 
-- `apps/api` — FastAPI backend (Python 3.12+, managed with [uv](https://docs.astral.sh/uv/))
-- `apps/web` — Angular frontend (standalone components + signals, managed with [pnpm](https://pnpm.io/))
-- `docs/` — architecture and design notes
+## Running it
 
-## Prerequisites
-
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) for Python dependency management
-- Node.js 20+ and [pnpm](https://pnpm.io/)
-- A Postgres `DATABASE_URL` — local development uses the Railway-hosted Postgres directly (there is no local Postgres setup). Grab the URL from the Railway dashboard for the `honor-code` service (it's exposed there as a reference variable to the Postgres service).
-
-## Run the API locally
-
-The API needs the following in its environment:
-
-- `DATABASE_URL` — Postgres URL from Railway
-- `SESSION_SECRET` — at least 32 bytes of random data, used to sign session cookies and the transient OAuth state cookie
-- `ENCRYPTION_KEY` — a Fernet key, used to encrypt OAuth tokens at rest
-- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — OAuth credentials from Google Cloud Console
-- `ALLOWED_EMAILS` — comma- or whitespace-separated list of Google account emails permitted to log in (case-insensitive)
-- `OAUTH_REDIRECT_URI` *(optional)* — the exact callback URL registered with Google. If unset, the app derives one from the incoming request, which only works if the proxy headers are trustworthy. On Railway, set it explicitly.
-
-Generate the two secrets like this:
+You need `uv` (Python) and `pnpm` (Node). Then:
 
 ```bash
 cd apps/api
-uv run python -c 'import secrets; print(secrets.token_urlsafe(48))'                # SESSION_SECRET
-uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'  # ENCRYPTION_KEY
+cp .env.example .env        # fill it in; the comments say how
+uv sync
+uv run --env-file .env alembic upgrade head
+uv run --env-file .env uvicorn app.main:app --reload
 ```
 
-The app refuses to start if any required variable is missing or malformed. Then run it:
+That is the API on `localhost:8000`. `/api/health` returns
+`{"status":"ok","database":"connected"}` when things are working. The database
+is `apps/api/data/honor-code.db`, created on the first run.
 
-```bash
-cd apps/api
-DATABASE_URL='postgresql://...' \
-  SESSION_SECRET='...' ENCRYPTION_KEY='...' \
-  GOOGLE_CLIENT_ID='...' GOOGLE_CLIENT_SECRET='...' \
-  ALLOWED_EMAILS='you@example.com' \
-  uv run uvicorn app.main:app --reload
-```
-
-The API listens on http://localhost:8000. Verify with:
-
-```bash
-curl http://localhost:8000/health
-# {"status":"ok","database":"connected"}
-```
-
-If the database is unreachable, `/health` returns HTTP 503 with
-`{"detail":{"status":"error","database":"unreachable"}}`. The connection string is never echoed in the response or logged.
-
-### Testing the Google OAuth flow
-
-Register `http://localhost:8000/auth/google/callback` as an authorized redirect URI in Google Cloud Console (or use your Railway URL for production). Then in a browser:
-
-1. Open `http://localhost:8000/auth/google/login` — you'll land on Google's consent screen.
-2. Sign in with an email listed in `ALLOWED_EMAILS`. Google sends you back to `/auth/google/callback`, the API sets a `honor_code_session` cookie, and you're redirected to `/auth/me`, which returns your email and display name.
-3. Hitting `/auth/me` from a fresh browser (no cookie) returns 401. Tampering with the cookie also returns 401 and logs a warning.
-4. `POST /auth/logout` clears the cookie and deletes the session row; `/auth/me` then returns 401 again.
-5. Signing in with an email not in `ALLOWED_EMAILS` is rejected with 403 at the callback; no user row is created.
-
-## Database migrations (Alembic)
-
-Migrations live in `apps/api/alembic/versions/`. Alembic reads `DATABASE_URL` from the environment (no need to edit `alembic.ini`). The application uses asyncpg at runtime; Alembic uses sync psycopg2 internally — both drivers are dependencies of `apps/api`.
-
-All commands below are run from `apps/api/`:
-
-```bash
-cd apps/api
-
-# Apply all pending migrations
-DATABASE_URL='postgresql://...' uv run alembic upgrade head
-
-# Roll back the most recent migration
-DATABASE_URL='postgresql://...' uv run alembic downgrade -1
-
-# Roll back everything (drops the users and sessions tables)
-DATABASE_URL='postgresql://...' uv run alembic downgrade base
-
-# Create a new migration after editing models in app/db/models/
-DATABASE_URL='postgresql://...' uv run alembic revision --autogenerate -m "describe change"
-
-# Show current revision
-DATABASE_URL='postgresql://...' uv run alembic current
-```
-
-Re-running `alembic upgrade head` against an already-migrated database is a no-op.
-
-### Tables created by the initial migration
-
-- `users` — `id` (UUID PK, default `gen_random_uuid()`), `email` (unique), `google_sub` (unique nullable), `display_name`, `created_at`, `last_login_at`
-- `sessions` — `id` (UUID PK), `user_id` (FK to `users.id` ON DELETE CASCADE), `expires_at`, `created_at`, `last_seen_at`, `user_agent`, `ip_address` (INET); indexed on `user_id` and `expires_at`
-
-The migration also creates the `pgcrypto` extension (used by `gen_random_uuid()`).
-
-## Run the web app locally
+The frontend, in a second terminal:
 
 ```bash
 cd apps/web
-pnpm install   # first time only
+pnpm install                # first time
 pnpm start
 ```
 
-The Angular dev server listens on http://localhost:4200.
+That is `localhost:4200`. The dev server proxies `/api` to the API, so the
+browser only ever talks to one origin and there is no CORS anywhere. For sign-in
+to land you back on the dev server, set `POST_LOGIN_REDIRECT=http://localhost:4200/`
+in `apps/api/.env`.
 
-## Repository layout
+## Google sign-in
 
+One OAuth client in Google Cloud Console, with one authorized redirect URI:
+`http://localhost:8000/api/auth/google/callback`. Put its client ID and secret in
+`.env`, and your own address in `ALLOWED_EMAILS`. Nobody else can sign in.
+
+The API derives that redirect URI from `APP_BASE_URL`; it never trusts the
+incoming request for it. Cookies are `Secure` only when `APP_BASE_URL` is
+https, and plain http is refused for any host but localhost.
+
+## Database changes
+
+Models live in `apps/api/app/db/models/`. After editing them:
+
+```bash
+cd apps/api
+uv run --env-file .env alembic revision --autogenerate -m "what changed"
+uv run --env-file .env alembic upgrade head
 ```
-honor-code/
-├── apps/
-│   ├── api/        # FastAPI app
-│   │   ├── app/
-│   │   │   ├── auth/      # Google OAuth + session cookies
-│   │   │   ├── db/        # SQLAlchemy engine, session, models
-│   │   │   ├── security/  # token encryption helpers (Fernet)
-│   │   │   └── main.py
-│   │   ├── alembic/    # migration environment + versions
-│   │   └── alembic.ini
-│   └── web/        # Angular app
-└── docs/
-    └── architecture.md
+
+`alembic downgrade -1` undoes the last migration; `alembic downgrade base` drops
+everything. Re-running `upgrade head` on a current database does nothing.
+
+## Tests
+
+```bash
+cd apps/api && uv run pytest      # no .env, no network, nothing running
+cd apps/web && pnpm test          # vitest, headless
 ```
+
+The API suite mocks Google at one seam (Authlib's token exchange) and refuses
+any real network call. The one thing it cannot check is the actual Google
+round-trip; do that in a browser after changing anything in `app/auth/`.
+
+## Notes to self
+
+- Timestamps are `UTCDateTime` (`app/db/types.py`), never a bare `DateTime`.
+  SQLite returns naive datetimes otherwise and the session-expiry comparison
+  blows up. Never import from `sqlalchemy.dialects`; the models are
+  dialect-neutral on purpose so moving to Postgres later is one new migration.
+- Foreign keys are only enforced because `make_engine` turns the pragma on
+  for every connection. Without it, deleting a user leaves its sessions behind.
+- Cookies on `localhost` are shared across ports. That is why a session set by
+  the API on `:8000` is sent on requests from the page on `:4200`, and why dev
+  mode works without any cross-origin configuration.
+- The default `DATABASE_URL` is an absolute path anchored to `apps/api`, so the
+  server and Alembic use the same file no matter which directory they start in.
+- Not here yet: a one-process mode where the API serves the built frontend, and
+  CI. Both are in the plan; see `docs/`.

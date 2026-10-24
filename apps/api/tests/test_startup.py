@@ -115,7 +115,7 @@ def test_refuses_missing_google_client_id():
 
 
 def test_removed_variables_are_ignored_not_required():
-    # The Railway-era variables must have no effect either way.
+    # The removed deployment-era variables must have no effect either way.
     _assert_accepted(
         _run(
             FRONTEND_ORIGINS=None,
