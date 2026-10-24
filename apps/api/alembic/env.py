@@ -1,59 +1,56 @@
 """Alembic environment.
 
-Reads DATABASE_URL from the environment and forces a synchronous psycopg2
-driver for migrations. The application itself uses asyncpg at runtime; we
-deliberately use sync psycopg2 here so Alembic's standard runner works.
+Reads DATABASE_URL from the environment (same default as the app) and runs
+migrations over a synchronous engine. The app uses aiosqlite at runtime;
+migrations use the stdlib sqlite3 driver, so the async marker is stripped
+from the URL here. render_as_batch is on because SQLite supports almost no
+ALTER TABLE, and batch mode is how Alembic works around that.
 """
 
 from __future__ import annotations
 
-import os
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
-# Importing the models registers them on Base.metadata so autogenerate
-# can detect schema drift.
+# Importing the models registers them on Base.metadata so autogenerate and
+# compare_metadata can see them.
+from app.db import models  # noqa: F401
 from app.db.base import Base
-from app.db import models  # noqa: F401  (import side effect: registers models)
+from app.db.session import _ensure_sqlite_parent_dir, database_url
 
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers defaults to True, which would silently switch
+    # off the app's own loggers whenever migrations run in-process (tests,
+    # or a startup hook later). Keep them.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 
 def _sync_database_url() -> str:
-    url = os.environ.get("DATABASE_URL")
-    if not url:
-        raise RuntimeError("DATABASE_URL environment variable is not set")
-    if url.startswith("postgres://"):
-        url = "postgresql://" + url[len("postgres://") :]
-    # Alembic uses the sync engine; strip async driver if present.
-    if url.startswith("postgresql+asyncpg://"):
-        url = "postgresql://" + url[len("postgresql+asyncpg://") :]
-    if url.startswith("postgresql://") and "+psycopg2" not in url:
-        url = "postgresql+psycopg2://" + url[len("postgresql://") :]
+    url = database_url()
+    if url.startswith("sqlite+aiosqlite://"):
+        url = "sqlite://" + url[len("sqlite+aiosqlite://") :]
+    _ensure_sqlite_parent_dir(url)
     return url
 
 
-# Override whatever placeholder is in alembic.ini.
 config.set_main_option("sqlalchemy.url", _sync_database_url())
 
 target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=config.get_main_option("sqlalchemy.url"),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        render_as_batch=True,
     )
-
     with context.begin_transaction():
         context.run_migrations()
 
@@ -64,10 +61,12 @@ def run_migrations_online() -> None:
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
-
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
-
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            render_as_batch=True,
+        )
         with context.begin_transaction():
             context.run_migrations()
 

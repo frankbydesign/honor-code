@@ -1,16 +1,16 @@
 """Auth-related env vars, validated once at import.
 
 Importing this module is what makes the app fail fast at startup if a
-required secret is missing. Don't hardcode any of these values; they
-must come from the environment.
+required value is missing or malformed. Nothing here is hardcoded; every
+value comes from the environment. Errors are plain RuntimeErrors with the
+variable name in the message, so a bad .env is a one-line fix, not a
+traceback hunt.
 """
 
 from __future__ import annotations
 
 import os
-import re
-
-from app.auth.origins import compile_patterns, parse_patterns_env
+from urllib.parse import urlsplit
 
 
 def _required(name: str) -> str:
@@ -38,41 +38,44 @@ ALLOWED_EMAILS: frozenset[str] = frozenset(
 if not ALLOWED_EMAILS:
     raise RuntimeError("ALLOWED_EMAILS is set but contains no addresses")
 
-# If set, used verbatim as the Google OAuth redirect target. Otherwise
-# we derive it from the incoming request via url_for(). The env var is
-# the safer choice on Railway (proxy headers can lie).
-OAUTH_REDIRECT_URI: str | None = os.environ.get("OAUTH_REDIRECT_URI") or None
 
-# Frontend origins permitted to (a) make credentialed CORS requests and
-# (b) be used as the post-login `?next=` redirect target. Comma- or
-# whitespace-separated. Each entry must be a full origin
-# (scheme://host[:port]) with no path or trailing slash.
-_raw_frontend_origins = _required("FRONTEND_ORIGINS")
-FRONTEND_ORIGINS: tuple[str, ...] = tuple(
-    o.strip().rstrip("/")
-    for o in _raw_frontend_origins.replace(",", " ").split()
-    if o.strip()
-)
-if not FRONTEND_ORIGINS:
-    raise RuntimeError("FRONTEND_ORIGINS is set but contains no origins")
-for _origin in FRONTEND_ORIGINS:
-    if "://" not in _origin:
+# The one URL the app knows itself by. The Google OAuth redirect URI is
+# derived from it, and so is whether cookies carry the Secure flag. Plain
+# http is only accepted for localhost, so an insecure cookie can never be
+# configured against a real hostname by accident.
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _parse_app_base_url(raw: str) -> str:
+    parts = urlsplit(raw)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
         raise RuntimeError(
-            f"FRONTEND_ORIGINS entry {_origin!r} must be a full origin "
-            "like https://example.com (no path, no trailing slash)"
+            "APP_BASE_URL must be a full origin like http://localhost:8000 "
+            f"(got {raw!r})"
         )
+    if parts.path not in ("", "/") or parts.query or parts.fragment:
+        raise RuntimeError(
+            "APP_BASE_URL must not include a path, query, or fragment "
+            f"(got {raw!r})"
+        )
+    if parts.scheme == "http" and parts.hostname not in _LOCAL_HOSTS:
+        raise RuntimeError(
+            "APP_BASE_URL uses plain http on a host other than localhost; "
+            "cookies would be sent without the Secure flag. Use https:// or a "
+            f"localhost address (got {raw!r})"
+        )
+    return f"{parts.scheme}://{parts.netloc}"
 
-# Glob patterns layered on top of the FRONTEND_ORIGINS exact list. `*`
-# is the only wildcard. Used to allow Vercel Preview URLs whose host
-# names change per deployment. Empty/unset means "no patterns" — the
-# system then behaves identically to the pre-pattern config.
-_raw_frontend_origin_patterns = os.environ.get("FRONTEND_ORIGINS_PATTERNS", "")
-FRONTEND_ORIGINS_PATTERNS: tuple[str, ...] = parse_patterns_env(
-    _raw_frontend_origin_patterns
-)
-FRONTEND_ORIGINS_PATTERN_REGEX: re.Pattern[str] | None = compile_patterns(
-    FRONTEND_ORIGINS_PATTERNS
-)
+
+APP_BASE_URL: str = _parse_app_base_url(_required("APP_BASE_URL").strip())
+COOKIE_SECURE: bool = APP_BASE_URL.startswith("https://")
+OAUTH_REDIRECT_URI: str = f"{APP_BASE_URL}/api/auth/google/callback"
+
+# Where the browser lands after a successful login. Defaults to "/", which
+# is the built app served by this process. Set it to the Angular dev
+# server (http://localhost:4200/) while developing the frontend. Operator
+# configuration, not user input, so it is used verbatim.
+POST_LOGIN_REDIRECT: str = os.environ.get("POST_LOGIN_REDIRECT", "").strip() or "/"
 
 SESSION_COOKIE_NAME = "honor_code_session"
 SESSION_TTL_DAYS = 30
