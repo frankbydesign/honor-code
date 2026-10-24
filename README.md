@@ -116,4 +116,5 @@ round-trip; do that in a browser after changing anything in `app/auth/`.
   `index.html` goes out with `Cache-Control: no-cache` so a rebuild cannot
   leave the browser holding a page that names bundles that no longer exist.
   `WEB_DIST_DIR` overrides the location (the tests use it).
-- Not here yet: CI. It is in the plan; see `docs/`.
+- CI runs both suites and the build on every PR (`.github/workflows/ci.yml`). The
+  decisions behind the whole shape are in `docs/adr/0001-local-first-sqlite-no-deployment.md`.
