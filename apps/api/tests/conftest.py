@@ -31,6 +31,10 @@ _DEFAULTS = {
     "GOOGLE_CLIENT_ID": "test-client-id",
     "GOOGLE_CLIENT_SECRET": "test-client-secret",
     "ALLOWED_EMAILS": "test@example.com",
+    # The suite-wide app is API-only. Pointing this at a path that does not
+    # exist keeps the suite independent of whether `pnpm build` has run in
+    # this checkout; test_static.py builds its own app with a real dist dir.
+    "WEB_DIST_DIR": f"{_TEST_DIR}/no-frontend-build",
 }
 # Assigned unconditionally, never setdefault: an exported DATABASE_URL in the
 # shell would otherwise make the suite run (and wipe tables) against it.
