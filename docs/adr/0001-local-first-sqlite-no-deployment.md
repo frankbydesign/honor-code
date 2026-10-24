@@ -18,8 +18,9 @@ redirect URI to `http://`. The whole test suite at that point tested that layer
 and nothing else.
 
 Railway then had to be disconnected. Honor Code is a personal project, and the
-only Vercel account connected is Center Point's, which should not carry it.
-Nothing about developing the product requires it to be on the web.
+Vercel project that served the frontend lived on Center Point's team, which
+should not carry it. Nothing about developing the product requires it to be on
+the web.
 
 ## Decision
 
@@ -34,10 +35,12 @@ production, and the Gmail and Calendar integrations will reuse the same client.
 One `APP_BASE_URL` drives the OAuth redirect URI and the cookie `Secure` flag;
 plain `http` is accepted only for localhost.
 
-No hosting target is chosen. The Vercel project on the Center Point team is
-deleted, not kept idle. If Honor Code is ever hosted, it goes on a personal
-account, and it keeps the same-origin shape (one process, or one reverse proxy
-in front of both parts) rather than reintroducing a cross-origin split.
+No hosting target is chosen. The Vercel project was transferred off the Center
+Point team to the owner's personal Vercel account on 2026-10-24 and is kept
+there idle; nothing in this repo configures or depends on it, and a deployment
+of the frontend alone is a shell with no API behind it. If Honor Code is ever
+hosted, it keeps the same-origin shape (one process, or one reverse proxy in
+front of both parts) rather than reintroducing a cross-origin split.
 
 ## Consequences
 
