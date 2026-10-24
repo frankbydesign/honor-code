@@ -42,7 +42,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        # Version comes from the packageManager field in apps/web/package.json.
+        with:
+          # Monorepo: the packageManager field lives here, not at the root.
+          package_json_file: apps/web/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 22
