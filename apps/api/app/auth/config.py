@@ -67,7 +67,7 @@ def _parse_app_base_url(raw: str) -> str:
     return f"{parts.scheme}://{parts.netloc}"
 
 
-APP_BASE_URL: str = _parse_app_base_url(_required("APP_BASE_URL"))
+APP_BASE_URL: str = _parse_app_base_url(_required("APP_BASE_URL").strip())
 COOKIE_SECURE: bool = APP_BASE_URL.startswith("https://")
 OAUTH_REDIRECT_URI: str = f"{APP_BASE_URL}/api/auth/google/callback"
 

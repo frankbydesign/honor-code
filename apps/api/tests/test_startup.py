@@ -18,10 +18,11 @@ _IMPORT_CONFIG = textwrap.dedent(
     """
     import sys
     try:
-        import app.auth.config  # noqa: F401
+        import app.auth.config as c
     except RuntimeError as exc:
         sys.stderr.write(str(exc))
         sys.exit(2)
+    sys.stdout.write(f"COOKIE_SECURE={c.COOKIE_SECURE} REDIRECT={c.OAUTH_REDIRECT_URI}")
     sys.exit(0)
     """
 )
@@ -82,8 +83,23 @@ def test_accepts_http_localhost(url: str):
     _assert_accepted(_run(APP_BASE_URL=url))
 
 
-def test_accepts_https_any_host():
-    _assert_accepted(_run(APP_BASE_URL="https://honor.example.com"))
+def test_accepts_https_any_host_and_derives_secure_cookies():
+    result = _run(APP_BASE_URL="https://honor.example.com")
+    _assert_accepted(result)
+    assert "COOKIE_SECURE=True" in result.stdout
+    assert "REDIRECT=https://honor.example.com/api/auth/google/callback" in result.stdout
+
+
+def test_http_localhost_derives_insecure_cookies():
+    result = _run(APP_BASE_URL="http://localhost:8000")
+    _assert_accepted(result)
+    assert "COOKIE_SECURE=False" in result.stdout
+
+
+def test_surrounding_whitespace_in_base_url_is_tolerated():
+    result = _run(APP_BASE_URL="  http://localhost:8000 \n")
+    _assert_accepted(result)
+    assert "REDIRECT=http://localhost:8000/api/auth/google/callback" in result.stdout
 
 
 def test_refuses_short_session_secret():

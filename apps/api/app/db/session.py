@@ -3,7 +3,8 @@
 The engine and session factory are module-level singletons so one pool is
 shared across the process. Do not construct an engine per request.
 
-DATABASE_URL defaults to a SQLite file under apps/api/data/. Two SQLite
+DATABASE_URL defaults to apps/api/data/honor-code.db as an absolute path
+(resolved from this file's location, not the working directory). Two SQLite
 specifics live here so nothing else has to know about them: the data
 directory is created on demand (sqlite3 will not create it), and foreign
 keys are switched on for every connection (SQLite leaves them off by
@@ -25,7 +26,13 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-DEFAULT_DATABASE_URL = "sqlite+aiosqlite:///./data/honor-code.db"
+# apps/api/app/db/session.py -> parents[2] is apps/api. Anchoring the default
+# here means the same file is used no matter which directory the server or
+# alembic is started from. An explicit relative DATABASE_URL still resolves
+# against the current directory, as SQLite always does.
+API_DIR = Path(__file__).resolve().parents[2]
+DEFAULT_DATABASE_PATH = API_DIR / "data" / "honor-code.db"
+DEFAULT_DATABASE_URL = f"sqlite+aiosqlite:///{DEFAULT_DATABASE_PATH}"
 
 
 def database_url() -> str:

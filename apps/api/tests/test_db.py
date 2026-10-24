@@ -8,7 +8,7 @@ from pathlib import Path
 from sqlalchemy import func, select, text
 
 from app.db import models
-from app.db.session import make_engine
+from app.db.session import API_DIR, DEFAULT_DATABASE_URL, make_engine
 
 
 async def test_data_directory_is_created(tmp_path: Path):
@@ -67,3 +67,11 @@ async def test_health_reports_connected(client):
     resp = await client.get("/api/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok", "database": "connected"}
+
+
+def test_default_database_url_is_anchored_to_api_dir():
+    assert DEFAULT_DATABASE_URL.startswith("sqlite+aiosqlite:////"), DEFAULT_DATABASE_URL
+    assert DEFAULT_DATABASE_URL.endswith("/data/honor-code.db")
+    assert str(API_DIR / "data" / "honor-code.db") in DEFAULT_DATABASE_URL
+    assert API_DIR.name == "api" and API_DIR.parent.name == "apps"
+    assert (API_DIR / "alembic.ini").exists()

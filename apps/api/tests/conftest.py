@@ -2,7 +2,9 @@
 
 Order matters here. Every `app.*` module validates its environment at import
 time, and `app.db.session` builds the engine at import time, so the env vars
-below are set before anything from `app` is imported. Tests that need a
+below are set before anything from `app` is imported. They are assigned, not
+defaulted, so a DATABASE_URL exported in the shell can never be the one the
+suite truncates between tests. Tests that need a
 different configuration (the startup validators) run in subprocesses instead.
 
 The suite never touches the network: Authlib's Google client is seeded with
@@ -30,10 +32,12 @@ _DEFAULTS = {
     "GOOGLE_CLIENT_SECRET": "test-client-secret",
     "ALLOWED_EMAILS": "test@example.com",
 }
+# Assigned unconditionally, never setdefault: an exported DATABASE_URL in the
+# shell would otherwise make the suite run (and wipe tables) against it.
 for _key, _value in _DEFAULTS.items():
-    os.environ.setdefault(_key, _value)
-# POST_LOGIN_REDIRECT must be absent by default; one test sets it explicitly.
-os.environ.pop("POST_LOGIN_REDIRECT", None)
+    os.environ[_key] = _value
+for _stale in ("POST_LOGIN_REDIRECT", "FRONTEND_ORIGINS", "FRONTEND_ORIGINS_PATTERNS", "OAUTH_REDIRECT_URI"):
+    os.environ.pop(_stale, None)
 
 # Only now is it safe to import the application.
 import httpx  # noqa: E402

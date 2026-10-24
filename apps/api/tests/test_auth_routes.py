@@ -7,6 +7,7 @@ session row, cookie, redirect) is real and runs against SQLite.
 
 from __future__ import annotations
 
+import uuid
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlsplit
 
@@ -170,7 +171,45 @@ async def test_logout_returns_204_and_invalidates(client, db, monkeypatch):
     assert resp.status_code == 204
     assert resp.content == b""
     assert await _count(db, models.Session) == 0
+    cleared = _session_cookie_header(resp)
+    assert cleared is not None, "logout must send a clearing Set-Cookie"
+    assert "max-age=0" in cleared.lower() or "expires=" in cleared.lower()
     assert (await client.get("/api/auth/me")).status_code == 401
+
+
+async def test_session_is_revoked_when_email_leaves_allowlist(client, db, monkeypatch):
+    _mock_google(monkeypatch, _userinfo())
+    await _callback(client)
+    assert (await client.get("/api/auth/me")).status_code == 200
+
+    monkeypatch.setattr(config, "ALLOWED_EMAILS", frozenset({"someone-else@example.com"}))
+
+    resp = await client.get("/api/auth/me")
+
+    assert resp.status_code == 401
+    assert await _count(db, models.Session) == 0, "the revoked session row must be deleted"
+    # Even with the allowlist restored, the old cookie is dead.
+    monkeypatch.setattr(config, "ALLOWED_EMAILS", frozenset({ALLOWED}))
+    assert (await client.get("/api/auth/me")).status_code == 401
+
+
+async def test_cookies_are_secure_when_base_url_is_https(monkeypatch):
+    """COOKIE_SECURE is derived at import; exercise the cookie writers directly."""
+    from fastapi import Response
+
+    from app.auth import sessions
+
+    monkeypatch.setattr(config, "COOKIE_SECURE", True)
+    set_resp = Response()
+    sessions.set_session_cookie(set_resp, uuid.uuid4())
+    set_header = set_resp.headers["set-cookie"].lower()
+    assert "secure" in set_header
+    assert "httponly" in set_header
+    assert "samesite=lax" in set_header
+
+    clear_resp = Response()
+    sessions.clear_session_cookie(clear_resp)
+    assert "secure" in clear_resp.headers["set-cookie"].lower()
 
 
 async def test_login_redirects_to_google_with_derived_redirect_uri(client):
