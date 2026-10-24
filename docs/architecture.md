@@ -25,11 +25,14 @@ ports, which is why the dev-server mode works without special handling.
 
 ## Backend (`apps/api`)
 
-FastAPI, built by `create_app()` in `app/main.py`. Routes live under `/api`;
-an unmatched `/api/*` path is a JSON 404 and never falls through to the static
-mount. When `apps/web/dist/web/browser` exists it is mounted at `/` with an
-SPA fallback: a miss on a path with no file extension returns `index.html`, a
-miss on a file-looking path stays 404.
+FastAPI, built by `create_app()` in `app/main.py`. Routes live under `/api`,
+and nothing under `/api` is ever served from disk, whatever the method: a miss
+is a JSON 404, a known path with the wrong method is a 405 with `Allow`, and
+the answers are the same with or without a frontend build mounted. When
+`apps/web/dist/web/browser` exists it is mounted at `/` with an SPA fallback: a
+miss on a path with no file extension returns `index.html` (sent with
+`Cache-Control: no-cache`, so a rebuild is picked up on the next load), a miss
+on a file-looking path stays 404.
 
 Persistence is SQLAlchemy 2 (async, aiosqlite) with Alembic migrations.
 `app/db/session.py` owns the engine: it creates the data directory on demand
