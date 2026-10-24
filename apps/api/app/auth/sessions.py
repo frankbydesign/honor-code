@@ -107,26 +107,26 @@ async def delete_session_by_cookie(db: AsyncSession, request: Request) -> None:
 
 
 def set_session_cookie(response: Response, session_id: uuid.UUID) -> None:
-    # SameSite=None is required for the cookie to be sent on cross-site
-    # fetch() requests from the Vercel frontends to the Railway API.
-    # Modern browsers reject SameSite=None without Secure, so both must
-    # be set together.
+    # The frontend is served from the same origin as the API (directly, or
+    # through the Angular dev server's proxy), so SameSite=Lax is enough.
+    # Secure follows APP_BASE_URL: on for https, off for http://localhost.
     response.set_cookie(
         key=config.SESSION_COOKIE_NAME,
         value=_sign(session_id),
         max_age=config.SESSION_TTL_DAYS * 24 * 60 * 60,
         httponly=True,
-        secure=True,
-        samesite="none",
+        secure=config.COOKIE_SECURE,
+        samesite="lax",
         path="/",
     )
 
 
 def clear_session_cookie(response: Response) -> None:
+    # Attributes must match the ones used when setting, or browsers keep it.
     response.delete_cookie(
         key=config.SESSION_COOKIE_NAME,
         path="/",
         httponly=True,
-        secure=True,
-        samesite="none",
+        secure=config.COOKIE_SECURE,
+        samesite="lax",
     )

@@ -24,7 +24,10 @@ from app.db.session import _ensure_sqlite_parent_dir, database_url
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers defaults to True, which would silently switch
+    # off the app's own loggers whenever migrations run in-process (tests,
+    # or a startup hook later). Keep them.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 
 def _sync_database_url() -> str:
