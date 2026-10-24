@@ -12,11 +12,12 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.routing import Match
 from starlette.staticfiles import StaticFiles
 
 # Importing these modules at startup is what makes the app fail fast if
@@ -42,6 +43,10 @@ def web_dist_dir() -> Path:
     return Path(override).expanduser().resolve() if override else default_web_dist_dir()
 
 
+API_PREFIX = "/api"
+_API_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+
+
 class SPAStaticFiles(StaticFiles):
     """Static files with a single-page-app fallback.
 
@@ -50,9 +55,15 @@ class SPAStaticFiles(StaticFiles):
     index.html. A request for something that looks like a file
     (/missing.png) stays a 404, so a broken asset reference is visible
     instead of quietly returning HTML.
+
+    Nothing under /api is ever served from disk, whatever the method. The
+    router answers every /api request it knows about before this mount is
+    reached; anything that still arrives here is a miss.
     """
 
     async def get_response(self, path: str, scope):
+        if path == API_PREFIX[1:] or path.startswith(API_PREFIX[1:] + "/"):
+            raise StarletteHTTPException(status_code=status.HTTP_404_NOT_FOUND)
         try:
             return await super().get_response(path, scope)
         except StarletteHTTPException as exc:
@@ -60,9 +71,19 @@ class SPAStaticFiles(StaticFiles):
                 return await super().get_response("index.html", scope)
             raise
 
+    def file_response(self, full_path, stat_result, scope, status_code=200):
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        # index.html names the hashed bundles of one build. A copy the browser
+        # kept on a heuristic lifetime would, after a rebuild, point at files
+        # that no longer exist and render a blank page. no-cache still allows
+        # the ETag round-trip, so the cost is one conditional request.
+        if Path(full_path).name == "index.html":
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
 
 def _build_api_router() -> APIRouter:
-    api = APIRouter(prefix="/api")
+    api = APIRouter(prefix=API_PREFIX)
     api.include_router(auth_router)
 
     @api.get("/health")
@@ -77,11 +98,30 @@ def _build_api_router() -> APIRouter:
             )
         return {"status": "ok", "database": "connected"}
 
-    # Registered last so it only matches what no real route did. Keeps every
-    # /api/* miss a JSON 404 from the API instead of index.html from the
-    # static mount's SPA fallback.
-    @api.api_route("/{_unmatched:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
-    async def api_not_found(_unmatched: str):
+    # FastAPI does not add HEAD to GET routes, and a health probe is the one
+    # endpoint something might reasonably HEAD. Separate registration keeps
+    # the OpenAPI operation id unique.
+    api.add_api_route("/health", health, methods=["HEAD"], include_in_schema=False)
+
+    # Registered last, so it only matches what no real route did. Without it
+    # an /api miss would reach the static mount, whose "/" is a full match for
+    # everything; the router prefers a full match over a path-only (partial)
+    # one, so the SPA fallback would answer with index.html. This handler
+    # restores the answers the router gives when no mount is present: 405
+    # with Allow when the path exists under another method, else 404.
+    @api.api_route("/{_unmatched:path}", methods=_API_METHODS, include_in_schema=False)
+    async def api_not_found(request: Request, _unmatched: str):
+        allowed: set[str] = set()
+        for route in request.app.router.routes:
+            match, _ = route.matches(request.scope)
+            if match is Match.PARTIAL:
+                allowed.update(getattr(route, "methods", None) or ())
+        if allowed:
+            raise HTTPException(
+                status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+                detail="Method Not Allowed",
+                headers={"Allow": ", ".join(sorted(allowed))},
+            )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
 
     return api

@@ -19,9 +19,14 @@ scripts/run.sh
 
 It builds the frontend if needed, applies migrations, starts one process, and
 prints the URL: `http://localhost:8000`. That is the whole app. Ctrl-C stops
-it. Run it again any time; it only rebuilds when a source file is newer than the
-last build, and it refuses plainly if the port is taken. The database is
-`apps/api/data/honor-code.db`, created on the first run.
+it. Run it again any time; it only rebuilds when something the build reads is
+newer than the last build, and it refuses plainly if the port is taken. The
+database is `apps/api/data/honor-code.db`, created on the first run.
+
+The port is whatever `APP_BASE_URL` says. It is not a separate setting, because
+the Google redirect URI is derived from `APP_BASE_URL` too; to move the app to
+another port, change `APP_BASE_URL` and the redirect URI registered in Google
+Cloud Console together.
 
 ### Working on the frontend
 
@@ -31,22 +36,27 @@ scripts/dev.sh
 
 That runs the API with reload on `:8000` and the Angular dev server with hot
 reload on `:4200`, in one terminal. The dev server proxies `/api` to the API, so
-the browser only ever talks to one origin and there is no CORS anywhere. For
-sign-in to land you back on the dev server, set
-`POST_LOGIN_REDIRECT=http://localhost:4200/` in `apps/api/.env`; `dev.sh`
-reminds you if it is not set. Remove it again for daily use.
+the browser only ever talks to one origin and there is no CORS anywhere. Both
+scripts set `POST_LOGIN_REDIRECT` themselves (`/` for `run.sh`,
+`http://localhost:4200/` for `dev.sh`), so sign-in lands on the right server
+without editing `.env` between them. The scripts need bash 3.2 or later, which
+is what macOS ships.
 
 ### By hand
 
 The scripts are thin. The same thing, spelled out:
 
 ```bash
-cd apps/api
+cd apps/web && pnpm install && pnpm build          # the built app; the API serves it from /
+cd ../api
 uv run --env-file .env alembic upgrade head
-uv run --env-file .env uvicorn app.main:app --reload     # API on :8000
-cd ../web && pnpm install && pnpm build                  # built app, served by the API at /
-pnpm start                                               # or the dev server on :4200
+uv run --env-file .env uvicorn app.main:app        # http://localhost:8000
 ```
+
+The API decides at startup whether a build exists, so build first (or restart
+after building). For the dev-server flow, run `uvicorn ... --reload` in one
+terminal with `POST_LOGIN_REDIRECT=http://localhost:4200/` exported, and
+`pnpm start` in `apps/web` in another.
 
 `/api/health` returns `{"status":"ok","database":"connected"}` when things are
 working. Without a frontend build the API starts anyway, logs one warning, and
@@ -100,7 +110,10 @@ round-trip; do that in a browser after changing anything in `app/auth/`.
 - The default `DATABASE_URL` is an absolute path anchored to `apps/api`, so the
   server and Alembic use the same file no matter which directory they start in.
 - One-process mode serves `apps/web/dist/web/browser` from `/` with an SPA
-  fallback for paths without a file extension; anything under `/api` that does
-  not match a route is a JSON 404, never `index.html`. `WEB_DIST_DIR` overrides
-  the location (the tests use it).
+  fallback for paths without a file extension. Nothing under `/api` is ever
+  served from disk, whatever the method: a miss is a JSON 404, a known path
+  with the wrong method is a 405 with `Allow`, same as with no build mounted.
+  `index.html` goes out with `Cache-Control: no-cache` so a rebuild cannot
+  leave the browser holding a page that names bundles that no longer exist.
+  `WEB_DIST_DIR` overrides the location (the tests use it).
 - Not here yet: CI. It is in the plan; see `docs/`.
