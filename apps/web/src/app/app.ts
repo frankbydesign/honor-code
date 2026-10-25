@@ -18,6 +18,7 @@ export class App implements OnInit {
     // Once signed in, show the sync status (and follow a sync already running).
     effect(() => {
       if (this.auth.isAuthenticated()) this.sync.refresh();
+      else this.sync.stop();
     });
   }
 

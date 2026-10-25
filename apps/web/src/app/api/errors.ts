@@ -11,8 +11,10 @@ export function messageFor(err: unknown): string {
       return 'Not found; it may have been removed';
     case 409:
       return detail ?? 'That change conflicts with the current state';
+    case 422:
+      return 'That value was not accepted; check that it is not empty or too long';
     case 502:
-      return 'Extraction failed; see the meeting page for the run';
+      return 'Extraction failed; the runs list below shows why';
     case 503:
       return detail ?? 'Not configured yet';
     default:

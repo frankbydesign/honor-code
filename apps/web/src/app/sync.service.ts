@@ -5,6 +5,9 @@ import { messageFor } from './api/errors';
 import { SyncStatus } from './api/models';
 
 const POLL_MS = 2000;
+const RETRY_MS = 5000;
+/** How often to look for syncs the app ran on its own schedule. */
+const IDLE_MS = 60000;
 
 @Injectable({ providedIn: 'root' })
 export class SyncService {
@@ -17,6 +20,8 @@ export class SyncService {
   private readonly _finished = signal(0);
   private timer: ReturnType<typeof setTimeout> | null = null;
   private watching = false;
+  private lastRunId: string | null | undefined = undefined;
+  private active = true;
 
   readonly status = this._status.asReadonly();
   readonly syncing = this._syncing.asReadonly();
@@ -25,7 +30,14 @@ export class SyncService {
   readonly finishedCount = this._finished.asReadonly();
 
   refresh(): void {
+    this.active = true;
     this.poll();
+  }
+
+  /** Stop checking (signed out). refresh() starts again. */
+  stop(): void {
+    this.active = false;
+    this.clearTimer();
   }
 
   syncNow(): void {
@@ -54,24 +66,39 @@ export class SyncService {
     this.http.get<SyncStatus>(this.url, { withCredentials: true }).subscribe({
       next: (status) => {
         this._status.set(status);
+        const runId = status.last_run?.id ?? null;
+        const newRun = this.lastRunId !== undefined && runId !== this.lastRunId;
+        this.lastRunId = runId;
         if (status.running) {
           this.watching = true;
           this._syncing.set(true);
-          this.timer = setTimeout(() => this.poll(), POLL_MS);
+          this.schedule(POLL_MS);
           return;
         }
         this._syncing.set(false);
-        if (this.watching) {
+        if (this.watching || newRun) {
+          // Ours (Sync now) or the app's own schedule: either way, screens reload.
           this.watching = false;
           this._finished.update((n) => n + 1);
         }
+        this.schedule(IDLE_MS);
       },
       error: (err: unknown) => {
+        if (this.watching) {
+          // A blip mid-sync (API restart, network): keep following it.
+          this.schedule(RETRY_MS);
+          return;
+        }
         this._error.set(messageFor(err));
         this._syncing.set(false);
-        this.watching = false;
+        this.schedule(IDLE_MS);
       },
     });
+  }
+
+  private schedule(ms: number): void {
+    if (!this.active) return;
+    this.timer = setTimeout(() => this.poll(), ms);
   }
 
   private clearTimer(): void {

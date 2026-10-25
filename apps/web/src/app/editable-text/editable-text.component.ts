@@ -15,6 +15,7 @@ import { Component, ElementRef, input, output, signal, viewChild } from '@angula
           type="text"
           [attr.aria-label]="label()"
           [value]="value() ?? ''"
+          [attr.maxlength]="maxLength()"
           (keydown.enter)="save(box.value)"
           (keydown.escape)="cancel()"
         />
@@ -37,6 +38,7 @@ export class EditableTextComponent {
   readonly placeholder = input('none');
   readonly required = input(false);
   readonly enabled = input(true);
+  readonly maxLength = input(200);
   readonly saved = output<string | null>();
 
   protected readonly editing = signal(false);

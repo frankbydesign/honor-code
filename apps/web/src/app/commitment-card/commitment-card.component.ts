@@ -30,6 +30,7 @@ const STRENGTH_LABEL = { firm: 'Firm', soft: 'Soft', offer: 'Offer' } as const;
           label="summary"
           [value]="c.summary"
           [required]="true"
+          [maxLength]="500"
           [enabled]="editable() && !pending()"
           (saved)="emitEdit({ summary: $event ?? c.summary })"
         />
@@ -53,7 +54,7 @@ const STRENGTH_LABEL = { firm: 'Firm', soft: 'Soft', offer: 'Offer' } as const;
             placeholder="no date said"
             [value]="c.due_text"
             [enabled]="editable() && !pending()"
-            (saved)="emitEdit({ due_text: $event })"
+            (saved)="emitEdit({ due_text: $event, due_on: null })"
           />
           @if (c.due_on) {
             <span class="muted"> ({{ c.due_on }})</span>
@@ -91,7 +92,13 @@ const STRENGTH_LABEL = { firm: 'Firm', soft: 'Soft', offer: 'Offer' } as const;
         <div class="drop-note">
           <label>
             Why drop it? (optional)
-            <input #note type="text" (keydown.enter)="confirmDrop(note.value)" />
+            <input
+              #note
+              type="text"
+              maxlength="2000"
+              (keydown.enter)="confirmDrop(note.value)"
+              (keydown.escape)="droppingNote.set(false)"
+            />
           </label>
           <button type="button" [disabled]="pending()" (click)="confirmDrop(note.value)">Confirm drop</button>
           <button type="button" (click)="droppingNote.set(false)">Cancel</button>
