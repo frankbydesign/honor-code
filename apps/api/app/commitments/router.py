@@ -147,6 +147,8 @@ async def extract_document(
         )
     try:
         run, created = await service.run_extraction(db, doc, extractor)
+    except service.NotFound:
+        raise _not_found() from None
     except service.ExtractionFailed as failed:
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
