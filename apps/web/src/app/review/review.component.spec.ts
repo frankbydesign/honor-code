@@ -119,4 +119,25 @@ describe('ReviewComponent', () => {
     const fixture = await render([]);
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('Nothing to review');
   });
+
+  it('editing "When" also clears the date worked out from the old wording', async () => {
+    const fixture = await render([makeCommitment()]);
+    const el = fixture.nativeElement as HTMLElement;
+    el.querySelector<HTMLButtonElement>('button[aria-label="Edit when"]')!.click();
+    fixture.detectChanges();
+    const box = el.querySelector<HTMLInputElement>('input[aria-label="when"]')!;
+    box.value = 'next month';
+    box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    const req = http.expectOne('/api/commitments/c-1');
+    expect(req.request.body).toEqual({ due_text: 'next month', due_on: null });
+    req.flush(makeCommitment({ due_text: 'next month', due_on: null }));
+  });
+
+  it('edit boxes limit length to what the server accepts', async () => {
+    const fixture = await render([makeCommitment()]);
+    const el = fixture.nativeElement as HTMLElement;
+    el.querySelector<HTMLButtonElement>('button[aria-label="Edit summary"]')!.click();
+    fixture.detectChanges();
+    expect(el.querySelector<HTMLInputElement>('input[aria-label="summary"]')!.maxLength).toBe(500);
+  });
 });

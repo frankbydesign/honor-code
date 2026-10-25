@@ -1,7 +1,8 @@
 import { Component, effect, inject, input, signal, untracked } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
+import { Subscription } from 'rxjs';
 import { messageFor } from '../api/errors';
-import { CommitmentPatch, DocumentDetail } from '../api/models';
+import { Commitment, CommitmentPatch, DocumentDetail } from '../api/models';
 import { CommitmentCardComponent, MoveRequest } from '../commitment-card/commitment-card.component';
 import { CommitmentsService } from '../commitments.service';
 import { DocumentsService } from '../documents.service';
@@ -138,8 +139,12 @@ export class MeetingDetailComponent {
     });
   }
 
+  private loading: Subscription | null = null;
+
   private load(id: string): void {
-    this.documents.get(id).subscribe({
+    // Latest wins: a newer load cancels an older one still in flight.
+    this.loading?.unsubscribe();
+    this.loading = this.documents.get(id).subscribe({
       next: (d) => {
         this.doc.set(d);
         this.loadError.set(null);
@@ -177,11 +182,19 @@ export class MeetingDetailComponent {
   }
 
   protected async move(id: string, req: MoveRequest): Promise<void> {
-    if (await this.commitments.transition(id, req.to, req.note)) this.load(this.id());
+    this.replace(await this.commitments.transition(id, req.to, req.note));
   }
 
   protected async edit(id: string, patch: CommitmentPatch): Promise<void> {
-    if (await this.commitments.edit(id, patch)) this.load(this.id());
+    this.replace(await this.commitments.edit(id, patch));
+  }
+
+  /** Put the server's answer straight into the page; no reload needed. */
+  private replace(updated: Commitment | null): void {
+    if (!updated) return;
+    this.doc.update((d) =>
+      d ? { ...d, commitments: d.commitments.map((c) => (c.id === updated.id ? updated : c)) } : d,
+    );
   }
 
   private afterAction(): void {

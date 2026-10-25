@@ -5,7 +5,7 @@ import { SyncService } from '../sync.service';
   selector: 'app-sync-status',
   template: `
     <div class="sync-status" data-testid="sync-status">
-      <span class="sync-text" [class.warn]="isProblem()">{{ text() }}</span>
+      <span class="sync-text" role="status" [class.warn]="isProblem()">{{ text() }}</span>
       <button
         type="button"
         class="small"
