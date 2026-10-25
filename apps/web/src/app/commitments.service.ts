@@ -1,6 +1,5 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
-import { firstValueFrom } from 'rxjs';
 import { environment } from '../environments/environment';
 import { messageFor } from './api/errors';
 import { Commitment, CommitmentPatch, CommitmentStatus } from './api/models';
@@ -87,19 +86,26 @@ export class CommitmentsService {
       .map(([key, list]) => ({ label: key || NO_COUNTERPARTY, items: [...list].sort(newestFirst) }));
   }
 
-  private async send(id: string, request: ReturnType<HttpClient['post']>): Promise<Commitment | null> {
+  private send(id: string, request: ReturnType<HttpClient['post']>): Promise<Commitment | null> {
+    // State is updated inside the subscription (synchronously when the
+    // response arrives); the promise is for callers that want to follow up.
     this.setPending(id, true);
     this.setItemError(id, null);
-    try {
-      const updated = (await firstValueFrom(request)) as Commitment;
-      this._items.update((list) => list.map((c) => (c.id === id ? updated : c)));
-      return updated;
-    } catch (err) {
-      this.setItemError(id, messageFor(err));
-      return null;
-    } finally {
-      this.setPending(id, false);
-    }
+    return new Promise((resolve) => {
+      request.subscribe({
+        next: (body) => {
+          const updated = body as Commitment;
+          this._items.update((list) => list.map((c) => (c.id === id ? updated : c)));
+          this.setPending(id, false);
+          resolve(updated);
+        },
+        error: (err: unknown) => {
+          this.setItemError(id, messageFor(err));
+          this.setPending(id, false);
+          resolve(null);
+        },
+      });
+    });
   }
 
   private setPending(id: string, on: boolean): void {

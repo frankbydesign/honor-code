@@ -7,13 +7,18 @@
   <div class="shell">
     <header class="shell-header">
       <h1>Honor Code</h1>
+      <nav aria-label="Main">
+        <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Review</a>
+        <a routerLink="/meetings" routerLinkActive="active">Meetings</a>
+      </nav>
+      <app-sync-status />
       <div class="shell-user">
         <span class="email">{{ auth.currentUser()?.email }}</span>
         <button type="button" (click)="logout()">Sign out</button>
       </div>
     </header>
     <main class="shell-main">
-      <p class="muted">Nothing here yet.</p>
+      <router-outlet />
     </main>
   </div>
 } @else {
