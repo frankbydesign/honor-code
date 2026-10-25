@@ -1,1 +1,396 @@
-/* You can add global styles to this file, and also import other style files */
+/* App-wide styles. Component files stay small; the shared look lives here. */
+
+:root {
+  --ink: #1a1a1a;
+  --muted: #6b6b6b;
+  --line: #e5e5e5;
+  --paper: #ffffff;
+  --wash: #f7f7f5;
+  --accent: #1a1a1a;
+  --warn: #9a5b00;
+  --error: #b42318;
+  --firm: #1f6f43;
+  --soft: #6b5a00;
+  --offer: #3b4a8a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--wash);
+}
+
+a {
+  color: inherit;
+}
+
+h2 {
+  font-size: 1.25rem;
+  margin: 0 0 0.75rem;
+}
+
+h3 {
+  font-size: 0.95rem;
+  margin: 1.5rem 0 0.5rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.error {
+  color: var(--error);
+  margin: 0.5rem 0;
+}
+
+.warn {
+  color: var(--warn);
+}
+
+.empty {
+  padding: 2rem 0;
+}
+
+button.small {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+button.link {
+  border: none;
+  background: none;
+  padding: 0 0.25rem;
+  color: var(--muted);
+  text-decoration: underline;
+  font-size: 0.8rem;
+}
+
+button.danger {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--ink);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+p.muted {
+  margin: 0;
+}
+
+button {
+  font: inherit;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: 1px solid #d4d4d4;
+  background: white;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: #f5f5f5;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+button.primary {
+  margin-top: 0.25rem;
+  padding: 0.625rem 1.25rem;
+  font-weight: 500;
+  background: #1a1a1a;
+  color: white;
+  border-color: #1a1a1a;
+}
+
+button.primary:hover:not(:disabled) {
+  background: #333;
+}
+
+main section,
+.detail-header {
+  max-width: 44rem;
+}
+
+/* Shell navigation and sync status */
+
+nav {
+  display: flex;
+  gap: 1rem;
+}
+
+nav a {
+  text-decoration: none;
+  color: var(--muted);
+  padding: 0.25rem 0;
+  border-bottom: 2px solid transparent;
+}
+
+nav a.active {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.sync-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-left: auto;
+}
+
+/* Review tabs */
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 1rem;
+}
+
+.tabs [role='tab'] {
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
+  padding: 0.5rem 0.75rem;
+}
+
+.tabs [role='tab'].active {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.tabs .count {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-left: 0.25rem;
+}
+
+/* Commitment cards */
+
+.group {
+  max-width: 44rem;
+}
+
+.card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.card.closed {
+  opacity: 0.85;
+}
+
+.card-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.meeting-link {
+  color: var(--muted);
+}
+
+.badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+
+.badge[data-strength='firm'] {
+  color: var(--firm);
+}
+
+.badge[data-strength='soft'] {
+  color: var(--soft);
+}
+
+.badge[data-strength='offer'] {
+  color: var(--offer);
+}
+
+.summary {
+  font-size: 1.05rem;
+  font-weight: 500;
+  margin: 0.5rem 0;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.75rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+}
+
+.placeholder {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.editable.editing {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.editable input,
+.drop-note input {
+  font: inherit;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.quote summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.quote blockquote {
+  margin: 0.5rem 0;
+  padding-left: 0.75rem;
+  border-left: 3px solid var(--line);
+}
+
+.card-actions,
+.drop-note,
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.drop-note label input {
+  flex: none;
+}
+
+.card-actions button.primary,
+.detail-actions button.primary {
+  margin-top: 0;
+}
+
+.card-actions button,
+.drop-note button,
+.detail-actions button {
+  padding: 0.35rem 0.9rem;
+  font-size: 0.9rem;
+}
+
+.drop-note label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  flex: 1 1 14rem;
+}
+
+/* Meetings */
+
+.meeting-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-width: 44rem;
+}
+
+.meeting-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.75rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.counts {
+  display: flex;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.pill {
+  font-size: 0.75rem;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+}
+
+.detail-header p {
+  margin: 0;
+}
+
+.runs {
+  list-style: none;
+  padding: 0;
+  font-size: 0.85rem;
+}
+
+.runs li {
+  padding: 0.35rem 0;
+}
+
+.run-status[data-status='failed'] {
+  color: var(--error);
+}
+
+.run-status[data-status='succeeded'] {
+  color: var(--firm);
+}
+
+.transcript {
+  margin-top: 1.5rem;
+  max-width: 50rem;
+}
+
+@media (max-width: 640px) {
+  .sync-status {
+    margin-left: 0;
+    width: 100%;
+  }
+}

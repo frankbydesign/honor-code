@@ -14,10 +14,12 @@ transport turns any escape into a loud failure.
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import tempfile
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 from cryptography.fernet import Fernet
 
@@ -42,6 +44,14 @@ for _key, _value in _DEFAULTS.items():
     os.environ[_key] = _value
 for _stale in ("POST_LOGIN_REDIRECT", "FRONTEND_ORIGINS", "FRONTEND_ORIGINS_PATTERNS", "OAUTH_REDIRECT_URI"):
     os.environ.pop(_stale, None)
+# Phase 1 settings. The external keys are removed so no test can reach a
+# real service by accident; tests that need "configured" set them with
+# monkeypatch and inject fakes. The scheduler never runs in tests.
+for _stale in ("ANTHROPIC_API_KEY", "FATHOM_API_KEY", "EXTRACTION_MODEL", "FATHOM_BACKFILL_DAYS",
+               "FATHOM_SYNC_INTERVAL_MINUTES"):
+    os.environ.pop(_stale, None)
+os.environ["LOCAL_TIMEZONE"] = "America/Los_Angeles"
+os.environ["SYNC_ENABLED"] = "false"
 
 # Only now is it safe to import the application.
 import httpx  # noqa: E402
@@ -86,7 +96,22 @@ def _no_network(monkeypatch):
     async def deny(self, request):  # noqa: ANN001
         raise RuntimeError(f"network call attempted in tests: {request.url}")
 
-    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", deny)
+    def deny_sync(self, request):  # noqa: ANN001
+        raise RuntimeError(f"network call attempted in tests: {request.url}")
+
+    # httpx is what Authlib and our own clients use. httpx2 is the separate
+    # HTTP library the Anthropic SDK (2.x) ships with; without guarding it a
+    # test could reach api.anthropic.com unnoticed. Sync transports too.
+    transports = [httpx]
+    try:
+        import httpx2
+
+        transports.append(httpx2)
+    except ImportError:  # pragma: no cover  (only absent if the SDK changes)
+        pass
+    for lib in transports:
+        monkeypatch.setattr(lib.AsyncHTTPTransport, "handle_async_request", deny)
+        monkeypatch.setattr(lib.HTTPTransport, "handle_request", deny_sync)
 
 
 @pytest_asyncio.fixture(autouse=True, scope="session")
@@ -98,9 +123,11 @@ async def _schema():
 @pytest_asyncio.fixture(autouse=True)
 async def _clean_tables():
     yield
+    app.dependency_overrides.clear()
     async with SessionLocal() as session:
-        await session.execute(delete(models.Session))
-        await session.execute(delete(models.User))
+        # Children before parents, so this works with or without cascades.
+        for table in reversed(Base.metadata.sorted_tables):
+            await session.execute(delete(table))
         await session.commit()
 
 
@@ -115,3 +142,74 @@ async def client() -> AsyncIterator[httpx.AsyncClient]:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
+
+
+# --- Phase 1 fixtures ------------------------------------------------------
+
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+
+
+def load_fixture(relative: str):
+    return json.loads((FIXTURES_DIR / relative).read_text(encoding="utf-8"))
+
+
+@pytest_asyncio.fixture
+async def signed_in_client(client, monkeypatch) -> httpx.AsyncClient:
+    """The test client after one mocked Google login as the allowed user."""
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(
+        oauth.google,
+        "authorize_access_token",
+        AsyncMock(
+            return_value={
+                "access_token": "x",
+                "userinfo": {
+                    "email": "test@example.com",
+                    "email_verified": True,
+                    "sub": "google-sub-123",
+                    "name": "Test Person",
+                },
+            }
+        ),
+    )
+    resp = await client.get(
+        "/api/auth/google/callback",
+        params={"code": "fake-code", "state": "fake-state"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    return client
+
+
+@pytest_asyncio.fixture
+async def current_user(signed_in_client, db):
+    from sqlalchemy import select
+
+    return (
+        await db.execute(select(models.User).where(models.User.email == "test@example.com"))
+    ).scalar_one()
+
+
+@pytest.fixture
+def fake_extractor():
+    """A programmable extractor installed in place of the Anthropic one."""
+    from app.commitments.router import get_extractor
+    from tests.fakes import FakeExtractor
+
+    fake = FakeExtractor()
+    app.dependency_overrides[get_extractor] = lambda: fake
+    return fake
+
+
+@pytest_asyncio.fixture
+async def stored_meeting(current_user, db):
+    """The invented Alice-and-Frank meeting, stored through the service."""
+    from app.commitments.service import store_meeting
+    from app.sources.fathom import FathomMeeting, to_meeting_input
+
+    raw = load_fixture("fathom/meeting_basic.json")
+    meeting = FathomMeeting.model_validate(raw)
+    doc, created = await store_meeting(db, current_user, to_meeting_input(meeting, meeting.transcript or []))
+    assert created
+    return doc

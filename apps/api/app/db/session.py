@@ -51,7 +51,10 @@ def _ensure_sqlite_parent_dir(url: str) -> None:
 
 def make_engine(url: str) -> AsyncEngine:
     _ensure_sqlite_parent_dir(url)
-    engine = create_async_engine(url)
+    # hide_parameters keeps bound values (transcript text, quotes) out of
+    # the message of every database error, so a traceback in a log can
+    # never carry them.
+    engine = create_async_engine(url, hide_parameters=True)
 
     if make_url(url).get_backend_name() == "sqlite":
 
