@@ -21,6 +21,7 @@ from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import settings
@@ -90,11 +91,12 @@ def describe_error(exc: BaseException) -> str:
 # --- Meetings --------------------------------------------------------------
 
 
-async def find_document(db: AsyncSession, user: User, kind: str, external_id: str) -> SourceDocument | None:
+async def find_document(db: AsyncSession, user: User | uuid.UUID, kind: str, external_id: str) -> SourceDocument | None:
+    user_id = user if isinstance(user, uuid.UUID) else user.id
     return (
         await db.execute(
             select(SourceDocument).where(
-                SourceDocument.user_id == user.id,
+                SourceDocument.user_id == user_id,
                 SourceDocument.kind == kind,
                 SourceDocument.external_id == external_id,
             )
@@ -108,13 +110,14 @@ async def store_meeting(db: AsyncSession, user: User, meeting: MeetingInput) -> 
     A meeting already stored, including one that was removed (a tombstone),
     is returned as is with created=False.
     """
-    existing = await find_document(db, user, meeting.kind, meeting.external_id)
+    user_id = user.id  # read now: a rollback below would expire `user`
+    existing = await find_document(db, user_id, meeting.kind, meeting.external_id)
     if existing is not None:
         return existing, False
 
     raw_text = tx.render(meeting.segments)
     doc = SourceDocument(
-        user_id=user.id,
+        user_id=user_id,
         kind=meeting.kind,
         external_id=meeting.external_id,
         title=meeting.title[:300],
@@ -131,7 +134,15 @@ async def store_meeting(db: AsyncSession, user: User, meeting: MeetingInput) -> 
         vendor_action_items=meeting.vendor_action_items,
     )
     db.add(doc)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Another store of the same meeting won the race; use its row.
+        await db.rollback()
+        existing = await find_document(db, user_id, meeting.kind, meeting.external_id)
+        if existing is None:
+            raise
+        return existing, False
     await db.refresh(doc)
     return doc, True
 
@@ -176,12 +187,30 @@ async def status_counts(db: AsyncSession, document_ids: list[uuid.UUID]) -> dict
 # --- Extraction ------------------------------------------------------------
 
 
+class _RemovedDuringRun(Exception):
+    pass
+
+
+async def _is_live(db: AsyncSession, document_id: uuid.UUID) -> bool:
+    row = (
+        await db.execute(select(SourceDocument.removed_at).where(SourceDocument.id == document_id))
+    ).first()
+    return row is not None and row[0] is None
+
+
 def _segments(doc: SourceDocument) -> list[Segment]:
     return [Segment.model_validate(s) for s in doc.segments]
 
 
 async def run_extraction(db: AsyncSession, doc: SourceDocument, extractor: Extractor) -> tuple[ExtractionRun, list[Commitment]]:
-    """One model call against one document. Raises ExtractionFailed on failure."""
+    """One model call against one document.
+
+    Raises NotFound if the document is removed (before or during the call),
+    and ExtractionFailed for every other failure.
+    """
+    if doc.removed_at is not None:
+        raise NotFound
+    doc_id = doc.id
     run = ExtractionRun(
         document_id=doc.id,
         status=RunStatus.RUNNING,
@@ -208,6 +237,8 @@ async def run_extraction(db: AsyncSession, doc: SourceDocument, extractor: Extra
             user=build_user_message(doc.raw_text, ctx),
         )
         output = ExtractionOutput.model_validate(result.raw)
+        if not await _is_live(db, doc_id):
+            raise _RemovedDuringRun
 
         created: list[Commitment] = []
         stamp = now()
@@ -246,8 +277,12 @@ async def run_extraction(db: AsyncSession, doc: SourceDocument, extractor: Extra
         return run, created
     except Exception as exc:  # noqa: BLE001  (every failure becomes a failed run)
         await db.rollback()
-        error = describe_error(exc)
         failed = await db.get(ExtractionRun, run_id)
+        if failed is None or not await _is_live(db, doc_id):
+            # The meeting was removed while the model was working; its runs
+            # went with it. Nothing to record.
+            raise NotFound from None
+        error = describe_error(exc)
         failed.status = RunStatus.FAILED
         failed.error = error
         failed.finished_at = max(now(), failed.started_at)
