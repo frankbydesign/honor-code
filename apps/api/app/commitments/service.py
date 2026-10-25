@@ -104,13 +104,16 @@ async def find_document(db: AsyncSession, user: User | uuid.UUID, kind: str, ext
     ).scalar_one_or_none()
 
 
-async def store_meeting(db: AsyncSession, user: User, meeting: MeetingInput) -> tuple[SourceDocument, bool]:
+async def store_meeting(
+    db: AsyncSession, user: User | uuid.UUID, meeting: MeetingInput
+) -> tuple[SourceDocument, bool]:
     """Store a meeting once. Returns (document, created).
 
     A meeting already stored, including one that was removed (a tombstone),
     is returned as is with created=False.
     """
-    user_id = user.id  # read now: a rollback below would expire `user`
+    # Read now: a rollback below would expire `user`.
+    user_id = user if isinstance(user, uuid.UUID) else user.id
     existing = await find_document(db, user_id, meeting.kind, meeting.external_id)
     if existing is not None:
         return existing, False
