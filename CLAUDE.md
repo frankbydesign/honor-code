@@ -5,7 +5,8 @@ Operating notes for Claude (and future contributors) working in this repo.
 ## Project
 
 Honor Code is a personal app that extracts and tracks commitments from
-Fathom transcripts (and, eventually, Gmail). Single user, single developer,
+Fathom meetings (and, next, Gmail). Meetings arrive by an in-app sync with
+the Fathom API; nothing is pasted by hand. Single user, single developer,
 runs on the owner's own machine. There is no hosted deployment and none is
 planned for now. Optimize for clarity and small focused changes, not scale.
 
@@ -24,7 +25,7 @@ planned for now. Optimize for clarity and small focused changes, not scale.
 
 1. **Read the task description carefully.** Stop at the scope boundary the
    task defines. Do not add hosting, Docker, CORS, multi-user support, or
-   external integrations (Fathom API, Gmail) unless the task asks for them.
+   new external integrations (Gmail, webhooks) unless the task asks for them.
 2. **Keep diffs small and focused.** Feature tasks should not refactor
    unrelated code.
 3. **Never commit secrets.** No `.env` files, no API keys, no credentials.
@@ -42,7 +43,12 @@ planned for now. Optimize for clarity and small focused changes, not scale.
    ships with an Alembic migration, and `tests/test_migrations.py` must stay
    green (it checks the migration matches the models).
 8. **Tests run offline.** The API suite must pass with no `.env`, no network,
-   and nothing running. The conftest enforces this; do not weaken it.
+   and nothing running. The conftest enforces this (for both httpx and the
+   httpx2 library the Anthropic SDK uses); do not weaken it. Fathom and the
+   model are replaced at one seam each: `tests/fakes.py`.
+9. **Never log transcript text or model output.** Errors are stored as the
+   exception class plus known-safe fields (`describe_error`), and the engine
+   hides bound parameters. Neither API key is ever logged or returned.
 
 ## Commands
 
@@ -62,5 +68,5 @@ pnpm build
 
 - Hosted deployment of any kind, CORS, any PaaS
 - Multi-user support
-- Fathom API and Gmail integrations (manual transcript paste comes first)
+- Gmail (the next pack), Fathom webhooks (ADR 0003)
 - Docker, launchd, packaging

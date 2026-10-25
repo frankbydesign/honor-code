@@ -8,6 +8,8 @@ simply absent (no build directory) and nothing else changes.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import os
 from pathlib import Path
@@ -27,6 +29,9 @@ from app.auth import config as auth_config
 from app import settings
 from app.auth.router import router as auth_router
 from app.commitments.router import router as commitments_router
+from app.sync import service as sync_service
+from app.sync.router import router as sync_router
+from app.sync.scheduler import scheduler_loop
 from app.db.session import get_session
 from app.security import token_crypto  # noqa: F401  (validates ENCRYPTION_KEY)
 
@@ -88,6 +93,7 @@ def _build_api_router() -> APIRouter:
     api = APIRouter(prefix=API_PREFIX)
     api.include_router(auth_router)
     api.include_router(commitments_router)
+    api.include_router(sync_router)
 
     @api.get("/health")
     async def health(db: AsyncSession = Depends(get_session)) -> dict[str, str]:
@@ -130,10 +136,47 @@ def _build_api_router() -> APIRouter:
     return api
 
 
+@contextlib.asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Start the Fathom sync loop when it is enabled and configured.
+
+    The loop looks up run_scheduled_sync on each call, so it always runs
+    the current settings. Shutdown cancels it.
+    """
+    task: asyncio.Task | None = None
+    try:
+        closed = await sync_service.sweep_interrupted()
+        if closed:
+            logger.info("closed %d runs interrupted by the last shutdown", closed)
+    except Exception as exc:  # noqa: BLE001  (e.g. migrations not applied yet)
+        logger.warning("could not check for interrupted runs: %s", type(exc).__name__)
+    missing = settings.missing_for_sync()
+    if not settings.sync_enabled():
+        logger.info("automatic sync is off (SYNC_ENABLED=false)")
+    elif missing:
+        logger.warning("automatic sync is off: %s not set", ", ".join(missing))
+    else:
+        task = asyncio.create_task(
+            scheduler_loop(
+                lambda trigger: sync_service.run_scheduled_sync(trigger),
+                interval_seconds=settings.fathom_sync_interval_minutes() * 60,
+            ),
+            name=sync_service.SCHEDULER_TASK_NAME,
+        )
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        await sync_service.cancel_background()
+
+
 def create_app() -> FastAPI:
     # Optional Phase 1 settings; only malformed values stop startup.
     settings.validate()
-    app = FastAPI(title="Honor Code API")
+    app = FastAPI(title="Honor Code API", lifespan=lifespan)
 
     # Authlib stashes the OAuth state parameter in this signed cookie between
     # /login and /callback. Distinct cookie name from the app session. The

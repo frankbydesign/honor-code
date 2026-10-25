@@ -57,7 +57,7 @@ def fathom_backfill_days() -> int:
 
 
 def fathom_sync_interval_minutes() -> int:
-    return _int("FATHOM_SYNC_INTERVAL_MINUTES", 30, 0)
+    return _int("FATHOM_SYNC_INTERVAL_MINUTES", 30, 1)
 
 
 def sync_enabled() -> bool:
