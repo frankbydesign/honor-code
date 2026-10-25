@@ -24,7 +24,9 @@ from starlette.staticfiles import StaticFiles
 # APP_BASE_URL, SESSION_SECRET, ENCRYPTION_KEY, or the Google values are
 # missing or malformed.
 from app.auth import config as auth_config
+from app import settings
 from app.auth.router import router as auth_router
+from app.commitments.router import router as commitments_router
 from app.db.session import get_session
 from app.security import token_crypto  # noqa: F401  (validates ENCRYPTION_KEY)
 
@@ -85,6 +87,7 @@ class SPAStaticFiles(StaticFiles):
 def _build_api_router() -> APIRouter:
     api = APIRouter(prefix=API_PREFIX)
     api.include_router(auth_router)
+    api.include_router(commitments_router)
 
     @api.get("/health")
     async def health(db: AsyncSession = Depends(get_session)) -> dict[str, str]:
@@ -128,6 +131,8 @@ def _build_api_router() -> APIRouter:
 
 
 def create_app() -> FastAPI:
+    # Optional Phase 1 settings; only malformed values stop startup.
+    settings.validate()
     app = FastAPI(title="Honor Code API")
 
     # Authlib stashes the OAuth state parameter in this signed cookie between
