@@ -1,9 +1,10 @@
 # Honor Code
 
 A personal app for keeping track of the commitments I make on calls and in
-email, and following through on them. It reads Fathom transcripts now and will
-read Gmail later. It runs on my own machine: one SQLite file, Google sign-in,
-nothing hosted.
+email, and following through on them. It pulls my Fathom meetings on its own,
+has a model pick out what I said I would do, and gives me one screen to accept,
+reject, fix, and later close those out. Gmail comes next. It runs on my own
+machine: one SQLite file, Google sign-in, nothing hosted.
 
 The repo is a monorepo. `apps/api` is the FastAPI backend, `apps/web` is the
 Angular frontend, `docs/` is notes.
@@ -61,6 +62,31 @@ terminal with `POST_LOGIN_REDIRECT=http://localhost:4200/` exported, and
 `/api/health` returns `{"status":"ok","database":"connected"}` when things are
 working. Without a frontend build the API starts anyway, logs one warning, and
 `/` is a 404.
+
+## Using it
+
+Put `ANTHROPIC_API_KEY` and `FATHOM_API_KEY` in `apps/api/.env` (the template
+says where each comes from), start the app, and sign in once. A few seconds
+after startup it syncs: the first time it reaches 14 days back, after that it
+picks up from the last sync, and it syncs again every 30 minutes while it
+runs. **Sync now** in the header does it on demand. Each new meeting is read
+by the model, and whatever you committed to lands on **Review** as a
+candidate, grouped by who it is for. Accept the real ones, reject the noise,
+fix the wording or the date in place, and mark them done (or drop them, with
+a reason) when they are finished. **Meetings** lists what has been synced; a
+meeting's page shows its transcript, the extraction runs, and Fathom's own
+action items for comparison.
+
+Without the keys the app still runs, and the header says which key is
+missing. The sync only runs while the app does (ADR 0003).
+
+## Evaluating the prompt
+
+Tests cannot say whether the model finds the right commitments; your own
+meetings can. `apps/api/eval/README.md` walks through a round: save a few
+real meetings (git-ignored), write down what you know you promised, run the
+script against one or two models, read the scores. ADR 0002 explains why it
+works this way.
 
 ## Google sign-in
 

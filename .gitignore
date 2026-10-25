@@ -49,3 +49,7 @@ yarn-error.log*
 *.swo
 .DS_Store
 Thumbs.db
+
+# Extraction eval data: real meeting content, never committed (ADR 0002)
+apps/api/eval/*
+!apps/api/eval/README.md

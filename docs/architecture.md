@@ -73,8 +73,45 @@ Google OAuth through Authlib; the app holds sessions itself.
 `expires_at`, `created_at`, `last_seen_at`, `user_agent`, `ip_address`
 (`String(45)`). Indexed on `user_id` and `expires_at`.
 
-Product tables (source documents, extraction runs, commitments, status events)
-arrive with Phase 1 and follow the same conventions.
+`source_documents`: one row per meeting (`kind` is `fathom_meeting`; Gmail
+threads come later). Unique on (`user_id`, `kind`, `external_id`), where the
+external id is Fathom's recording id. Holds the rendered transcript, the
+speaker turns, which speaker label is Frank (`my_speaker`), the local meeting
+date, and Fathom's own action items for comparison. Removing a meeting clears
+its text and children and keeps the row as a tombstone (`removed_at`), so a
+later sync does not bring it back.
+
+`extraction_runs`: one row per model call against a meeting, with model,
+prompt version, token counts, timing, and a safe error description. Written
+before the call; candidates are written only together with success.
+
+`commitments`: what a run found, plus Frank's decisions. Status is one of
+`candidate`, `accepted`, `rejected`, `done`, `dropped`; the allowed moves are a
+fixed table in `app/commitments/service.py`. `quote_found` says whether the
+quoted words appear in a single speaker turn.
+
+`status_events`: append-only history, one row per status change.
+
+`sync_runs`: one row per Fathom sync, with its window and counts.
+
+Every foreign key is indexed and cascades from its parent.
+
+## Sync and extraction
+
+```
+Fathom API ──► sync (in-app, ADR 0003) ──► source_documents ──► Extractor ──► commitments ──► Review screen
+                  every 30 min / startup / Sync now        (Anthropic; one forced tool call)
+```
+
+`app/sync/service.py` lists meetings created since the window start, stores
+new ones (a failed or empty transcript counts as pending and is retried), and
+extracts every live meeting without a successful run and with fewer than
+three failed ones. One sync runs at a time. The two external services sit
+behind one seam each, `MeetingSource` (`app/sources/fathom.py`) and
+`Extractor` (`app/commitments/extraction.py`), which is where the tests swap
+in fakes. The extraction prompt is a versioned file under
+`app/commitments/prompts/`; its quality is measured by the eval script, not
+by tests (ADR 0002).
 
 ## Environment
 
@@ -85,12 +122,21 @@ drives the redirect URI and cookie flags), `POST_LOGIN_REDIRECT` (optional),
 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ALLOWED_EMAILS`. `WEB_DIST_DIR`
 overrides where the built frontend is looked for; the tests use it.
 
+Phase 1, all optional at startup: `ANTHROPIC_API_KEY`, `FATHOM_API_KEY`,
+`EXTRACTION_MODEL` (default `claude-sonnet-5-5`), `EXTRACTION_TIMEOUT_SECONDS`,
+`FATHOM_BACKFILL_DAYS` (14), `FATHOM_SYNC_INTERVAL_MINUTES` (30),
+`LOCAL_TIMEZONE` (`America/Los_Angeles`; a bad value stops startup),
+`SYNC_ENABLED`. Without the two keys the app runs and the sync status names
+what is missing.
+
 ## Tests
 
 `apps/api/tests` runs with no `.env`, no network, and nothing listening. The
 conftest sets every variable itself, seeds Authlib's Google metadata so no
 discovery fetch happens, and patches httpx's real transport to fail loudly on
-any escape. Google is mocked at one seam, Authlib's token exchange; everything
-after it is real. `apps/web` has vitest specs for `AuthService`. The real
+any escape, for both httpx and the httpx2 library the Anthropic SDK uses.
+Google is mocked at one seam, Authlib's token exchange; Fathom and the model
+at theirs (`tests/fakes.py`); everything after the seams is real.
+`apps/web` has vitest specs for the services and screens. The real
 Google round-trip is the one thing neither suite covers; check it in a browser
 after touching `app/auth/`.

@@ -49,6 +49,11 @@ planned for now. Optimize for clarity and small focused changes, not scale.
 9. **Never log transcript text or model output.** Errors are stored as the
    exception class plus known-safe fields (`describe_error`), and the engine
    hides bound parameters. Neither API key is ever logged or returned.
+10. **Prompt changes are evaluated, not just tested.** The extraction prompt
+    lives in `apps/api/app/commitments/prompts/`. Change it by adding the next
+    version file and bumping `PROMPT_VERSION`, then run an eval round
+    (`apps/api/eval/README.md`) before merging. Nothing under `apps/api/eval/`
+    except its README is ever committed: it holds real meetings (ADR 0002).
 
 ## Commands
 
