@@ -167,17 +167,61 @@ async def test_unexpected_error_fails_the_run_without_its_message(current_user, 
     assert "ValueError" in run.error
 
 
-async def test_transcript_failure_keeps_what_was_stored(current_user, db, source, fake_extractor):
-    source.transcript_errors[900103] = SourceError("Fathom returned HTTP 500 for /recordings/900103/transcript")
+async def test_one_failing_transcript_does_not_block_the_others(current_user, db, source, fake_extractor):
+    # Review finding: a recording whose transcript always fails (deleted,
+    # no access) must not stop newer meetings from arriving.
+    source.transcript_errors[900101] = SourceError("Fathom returned HTTP 404 for /recordings/900101/transcript")
     fake_extractor.returns([candidate()])
 
     run = await run_sync("manual", source=source, extractor=fake_extractor, now=NOW)
 
-    assert run.status == "failed"
-    assert "500" in run.error
-    assert [d.external_id for d in await _docs(db)] == ["900101", "900102"]
+    assert run.status == "succeeded"
+    assert [d.external_id for d in await _docs(db)] == ["900102", "900103"]
     assert run.meetings_new == 2
-    assert run.extractions_ok == 2  # what was stored still gets extracted
+    assert run.meetings_pending == 1  # tried again next time
+    assert "404" in run.error  # the reason is still visible
+    assert run.extractions_ok == 2
+
+
+async def test_failing_transcript_is_retried_and_window_keeps_moving(current_user, db, source, fake_extractor):
+    source.transcript_errors[900101] = SourceError("Fathom returned HTTP 500 for /recordings/900101/transcript")
+    first = await run_sync("startup", source=source, extractor=fake_extractor, now=NOW)
+    del source.transcript_errors[900101]
+
+    later = NOW + timedelta(hours=6)
+    second = await run_sync("interval", source=source, extractor=fake_extractor, now=later)
+
+    assert second.window_start <= datetime(2026, 10, 20, 17, 45, tzinfo=timezone.utc)  # still covers 900101
+    assert [d.external_id for d in await _docs(db)] == ["900101", "900102", "900103"]
+
+
+async def test_window_never_starts_in_the_future_after_a_clock_jump(current_user, source, fake_extractor):
+    # A sync that ran while the laptop clock was days fast must not push
+    # later windows past real meetings.
+    await run_sync("startup", source=source, extractor=fake_extractor, now=NOW + timedelta(days=10))
+    run = await run_sync("interval", source=source, extractor=fake_extractor, now=NOW)
+    assert run.window_start <= NOW - timedelta(hours=48)
+
+
+async def test_cancelled_sync_is_recorded_and_releases_the_lock(current_user, db, source, fake_extractor):
+    source.gate = asyncio.Event()
+    task = asyncio.create_task(run_sync("startup", source=source, extractor=fake_extractor, now=NOW))
+    for _ in range(100):
+        if source.list_calls:
+            break
+        await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    run = (await db.execute(select(models.SyncRun))).scalar_one()
+    assert run.status == "failed"
+    assert run.error == "cancelled"
+    assert run.finished_at is not None
+    # The next sync can start.
+    source.gate = None
+    again = await run_sync("manual", source=source, extractor=fake_extractor, now=NOW + timedelta(minutes=5))
+    assert again.status == "succeeded"
 
 
 async def test_meetings_are_processed_oldest_first(current_user, source, fake_extractor):

@@ -12,10 +12,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
+import logging
+
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.commitments.schemas import MeetingInput, Segment
+
+logger = logging.getLogger(__name__)
 
 
 class _Lenient(BaseModel):
@@ -109,7 +113,9 @@ class MeetingSource(Protocol):
 
 
 class _MeetingsPage(_Lenient):
-    items: list[FathomMeeting]
+    # Items are validated one by one, so a single malformed meeting is
+    # skipped instead of failing the whole page (and every later sync).
+    items: list[dict[str, Any]]
     next_cursor: str | None = None
 
 
@@ -173,7 +179,11 @@ class FathomClient:
                     page = _MeetingsPage.model_validate(body)
                 except ValidationError:
                     raise SourceError("Fathom returned an unexpected shape for /meetings") from None
-                meetings.extend(page.items)
+                for position, item in enumerate(page.items):
+                    try:
+                        meetings.append(FathomMeeting.model_validate(item))
+                    except ValidationError:
+                        logger.warning("skipped a malformed Fathom meeting (page item %d)", position)
                 cursor = page.next_cursor
                 if not cursor:
                     return meetings

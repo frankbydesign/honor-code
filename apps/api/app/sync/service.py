@@ -6,7 +6,8 @@ sync_runs row and then, in order:
 1. Lists Fathom meetings created since the window start.
 2. For each meeting not already stored (oldest first), fetches the
    transcript and stores it. An empty transcript means Fathom is still
-   processing; the meeting is counted as pending and tried next time.
+   processing, and a failed fetch means it would not serve this one; both
+   count as pending and are tried next time, and the sync moves on.
 3. Extracts every live meeting that has no successful extraction and
    fewer than MAX_EXTRACTION_FAILURES failed ones. Failures are counted
    but do not fail the sync.
@@ -104,7 +105,9 @@ async def compute_window_start(db: AsyncSession, now: datetime) -> datetime:
     start = last.started_at - OVERLAP
     if last.meetings_pending > 0:
         start = min(start, max(last.window_start, backfill_start))
-    return start
+    # A sync recorded while the clock ran fast must not push the window
+    # past meetings that really happened.
+    return min(start, now - OVERLAP)
 
 
 async def _create_run(factory: async_sessionmaker[AsyncSession], trigger: str, now: datetime) -> uuid.UUID:
@@ -122,9 +125,16 @@ async def _create_run(factory: async_sessionmaker[AsyncSession], trigger: str, n
 
 
 async def _store_new_meetings(factory, source: MeetingSource, user_id: uuid.UUID, window_start: datetime):
-    """Returns (seen, new, pending, error). Stops at the first source error."""
+    """Returns (seen, new, pending, transcript_failures, first_failure).
+
+    A failed transcript fetch counts as pending and the sync moves on: one
+    recording Fathom will not serve (deleted, no access) must not stop the
+    meetings after it. Pending meetings keep the next window open for them.
+    A failure to list meetings is raised to the caller.
+    """
     meetings = await source.list_meetings(created_after=window_start)
-    seen, new, pending = len(meetings), 0, 0
+    seen, new, pending, failures = len(meetings), 0, 0, 0
+    first_failure: BaseException | None = None
     for meeting in sorted(meetings, key=lambda m: (m.created_at, m.recording_id)):
         external_id = str(meeting.recording_id)
         async with factory() as db:
@@ -133,14 +143,17 @@ async def _store_new_meetings(factory, source: MeetingSource, user_id: uuid.UUID
         try:
             items = await source.get_transcript(meeting.recording_id)
         except Exception as exc:  # noqa: BLE001
-            return seen, new, pending, exc
+            pending += 1
+            failures += 1
+            first_failure = first_failure or exc
+            continue
         if not items:
             pending += 1
             continue
         async with factory() as db:
             _, created = await commitments.store_meeting(db, user_id, to_meeting_input(meeting, items))
         new += int(created)
-    return seen, new, pending, None
+    return seen, new, pending, failures, first_failure
 
 
 async def _extract_outstanding(factory, user_id: uuid.UUID, extractor: Extractor) -> tuple[int, int]:
@@ -186,37 +199,82 @@ async def _extract_outstanding(factory, user_id: uuid.UUID, extractor: Extractor
     return ok, failed
 
 
+async def _finish(factory, run_id: uuid.UUID, *, status: str, error: str | None, counts: dict[str, int]) -> SyncRun:
+    async with factory() as db:
+        run = await db.get(SyncRun, run_id)
+        for field, value in counts.items():
+            setattr(run, field, value)
+        run.status = status
+        run.error = error[:500] if error else None
+        run.finished_at = max(_utcnow(), run.started_at)
+        await db.commit()
+        return run
+
+
 async def _execute(
     factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID, source: MeetingSource, extractor: Extractor
 ) -> SyncRun:
-    seen = new = pending = ok = failed = 0
-    error: BaseException | None = None
-    async with factory() as db:
-        window_start = (await db.get(SyncRun, run_id)).window_start
+    counts = dict(meetings_seen=0, meetings_new=0, meetings_pending=0, extractions_ok=0, extractions_failed=0)
+    fatal: BaseException | None = None
+    note: str | None = None
     try:
         async with factory() as db:
+            window_start = (await db.get(SyncRun, run_id)).window_start
             user_id = await _owner_id(db)
-        seen, new, pending, error = await _store_new_meetings(factory, source, user_id, window_start)
+        seen, new, pending, failures, first_failure = await _store_new_meetings(
+            factory, source, user_id, window_start
+        )
+        counts.update(meetings_seen=seen, meetings_new=new, meetings_pending=pending)
+        if failures:
+            note = (
+                f"{failures} transcript{'s' if failures != 1 else ''} could not be fetched and will be "
+                f"retried; first: {describe_sync_error(first_failure)}"
+            )
         ok, failed = await _extract_outstanding(factory, user_id, extractor)
+        counts.update(extractions_ok=ok, extractions_failed=failed)
+    except asyncio.CancelledError:
+        # App shutdown (or a cancelled task): record it, then let it go.
+        await _finish(factory, run_id, status=RunStatus.FAILED, error="cancelled", counts=counts)
+        raise
     except Exception as exc:  # noqa: BLE001  (every failure ends up on the run row)
-        error = exc
+        fatal = exc
 
+    if fatal is not None:
+        run = await _finish(factory, run_id, status=RunStatus.FAILED, error=describe_sync_error(fatal), counts=counts)
+        logger.warning("sync %s failed: %s", run_id, run.error)
+    else:
+        run = await _finish(factory, run_id, status=RunStatus.SUCCEEDED, error=note, counts=counts)
+        logger.info(
+            "sync %s: %d new meetings, %d pending, %d extracted, %d extraction failures",
+            run_id, run.meetings_new, run.meetings_pending, run.extractions_ok, run.extractions_failed,
+        )
+    return run
+
+
+async def sweep_interrupted(factory: async_sessionmaker[AsyncSession] = SessionLocal) -> int:
+    """Close sync and extraction runs left 'running' by a previous process."""
+    from sqlalchemy import update
+
+    stamp = _utcnow()
     async with factory() as db:
-        run = await db.get(SyncRun, run_id)
-        run.meetings_seen = seen
-        run.meetings_new = new
-        run.meetings_pending = pending
-        run.extractions_ok = ok
-        run.extractions_failed = failed
-        run.status = RunStatus.FAILED if error is not None else RunStatus.SUCCEEDED
-        run.error = describe_sync_error(error) if error is not None else None
-        run.finished_at = max(_utcnow(), run.started_at)
+        total = 0
+        for model in (SyncRun, ExtractionRun):
+            result = await db.execute(
+                update(model)
+                .where(model.status == RunStatus.RUNNING)
+                .values(status=RunStatus.FAILED, error="interrupted", finished_at=stamp)
+            )
+            total += result.rowcount or 0
         await db.commit()
-        if error is not None:
-            logger.warning("sync %s failed: %s", run_id, run.error)
-        else:
-            logger.info("sync %s: %d new meetings, %d extracted, %d extraction failures", run_id, new, ok, failed)
-        return run
+    return total
+
+
+async def cancel_background() -> None:
+    """Cancel a Sync now still running at shutdown, and wait for it to record that."""
+    task = _background
+    if task is not None and not task.done():
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 async def _acquire() -> None:
