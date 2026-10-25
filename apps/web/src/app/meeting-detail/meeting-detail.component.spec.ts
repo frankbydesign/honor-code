@@ -112,6 +112,7 @@ describe('MeetingDetailComponent', () => {
     const el = fixture.nativeElement as HTMLElement;
     button(el, 'Accept')!.click();
     http.expectOne('/api/commitments/c-1/status').flush(makeCommitment({ status: 'accepted' }));
+    await fixture.whenStable();
     fixture.detectChanges();
     expect(button(el, 'Accept')).toBeUndefined();
     expect(button(el, 'Done')).not.toBeUndefined();
