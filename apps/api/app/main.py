@@ -144,6 +144,12 @@ async def lifespan(_app: FastAPI):
     the current settings. Shutdown cancels it.
     """
     task: asyncio.Task | None = None
+    try:
+        closed = await sync_service.sweep_interrupted()
+        if closed:
+            logger.info("closed %d runs interrupted by the last shutdown", closed)
+    except Exception as exc:  # noqa: BLE001  (e.g. migrations not applied yet)
+        logger.warning("could not check for interrupted runs: %s", type(exc).__name__)
     missing = settings.missing_for_sync()
     if not settings.sync_enabled():
         logger.info("automatic sync is off (SYNC_ENABLED=false)")
@@ -164,6 +170,7 @@ async def lifespan(_app: FastAPI):
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+        await sync_service.cancel_background()
 
 
 def create_app() -> FastAPI:
