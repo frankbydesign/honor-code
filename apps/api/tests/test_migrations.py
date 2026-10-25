@@ -33,6 +33,18 @@ def alembic_env(tmp_path: Path, monkeypatch):
     sync_engine.dispose()
 
 
+ALL_TABLES = {
+    "alembic_version",
+    "sessions",
+    "users",
+    "source_documents",
+    "sync_runs",
+    "extraction_runs",
+    "commitments",
+    "status_events",
+}
+
+
 def _tables(engine) -> set[str]:
     return set(inspect(engine).get_table_names())
 
@@ -40,7 +52,7 @@ def _tables(engine) -> set[str]:
 def test_upgrade_creates_tables(alembic_env):
     cfg, engine = alembic_env
     command.upgrade(cfg, "head")
-    assert _tables(engine) == {"alembic_version", "sessions", "users"}
+    assert _tables(engine) == ALL_TABLES
 
 
 def test_upgrade_is_idempotent(alembic_env):
@@ -57,7 +69,46 @@ def test_downgrade_removes_tables(alembic_env):
     command.downgrade(cfg, "base")
     assert _tables(engine) == {"alembic_version"}
     command.upgrade(cfg, "head")
+    assert _tables(engine) == ALL_TABLES
+
+
+def test_downgrade_one_step_keeps_phase0_tables(alembic_env):
+    cfg, engine = alembic_env
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "0001_initial")
     assert _tables(engine) == {"alembic_version", "sessions", "users"}
+
+
+def test_source_documents_unique_per_user_kind_external_id(alembic_env):
+    cfg, engine = alembic_env
+    command.upgrade(cfg, "head")
+    uniques = inspect(engine).get_unique_constraints("source_documents")
+    assert any(set(u["column_names"]) == {"user_id", "kind", "external_id"} for u in uniques), uniques
+
+
+@pytest.mark.parametrize(
+    "table,column",
+    [
+        ("source_documents", "user_id"),
+        ("extraction_runs", "document_id"),
+        ("commitments", "document_id"),
+        ("commitments", "run_id"),
+        ("status_events", "commitment_id"),
+    ],
+)
+def test_every_foreign_key_is_indexed(alembic_env, table, column):
+    cfg, engine = alembic_env
+    command.upgrade(cfg, "head")
+    indexed = [ix["column_names"] for ix in inspect(engine).get_indexes(table)]
+    assert [column] in indexed, f"{table}.{column} has no index: {indexed}"
+
+
+def test_foreign_keys_cascade(alembic_env):
+    cfg, engine = alembic_env
+    command.upgrade(cfg, "head")
+    for table in ("source_documents", "extraction_runs", "commitments", "status_events"):
+        for fk in inspect(engine).get_foreign_keys(table):
+            assert (fk.get("options") or {}).get("ondelete") == "CASCADE", (table, fk)
 
 
 def test_migration_matches_models(alembic_env):
