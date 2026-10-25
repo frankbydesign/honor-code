@@ -98,9 +98,19 @@ async def test_transport_failure_raises_source_error():
     assert KEY not in str(excinfo.value)
 
 
-async def test_malformed_body_raises_source_error():
+async def test_one_malformed_meeting_is_skipped_not_fatal():
+    # Review finding: one bad item must not fail every sync.
+    page = load_fixture("fathom/meetings_page2.json")
+    page["items"].insert(0, {"title": "no recording id", "created_at": None})
+    meetings = await _client(lambda r: _json(page)).list_meetings(
+        created_after=datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    assert [m.recording_id for m in meetings] == [900103]
+
+
+async def test_body_without_items_list_raises_source_error():
     with pytest.raises(SourceError):
-        await _client(lambda r: _json({"items": [{"title": "no id"}], "next_cursor": None})).list_meetings(
+        await _client(lambda r: _json({"items": "nope", "next_cursor": None})).list_meetings(
             created_after=datetime(2026, 1, 1, tzinfo=timezone.utc)
         )
 
