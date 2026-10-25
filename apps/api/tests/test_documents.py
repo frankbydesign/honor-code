@@ -99,29 +99,30 @@ async def test_get_unknown_document_is_404(signed_in_client):
 
 
 async def test_remove_document_leaves_tombstone(signed_in_client, current_user, db, stored_meeting, fake_extractor):
+    doc_id = stored_meeting.id  # read before expire_all() below
     fake_extractor.returns([candidate()])
-    await signed_in_client.post(f"/api/documents/{stored_meeting.id}/extract")
+    await signed_in_client.post(f"/api/documents/{doc_id}/extract")
 
-    resp = await signed_in_client.delete(f"/api/documents/{stored_meeting.id}")
+    resp = await signed_in_client.delete(f"/api/documents/{doc_id}")
     assert resp.status_code == 204
 
     assert await _count(db, models.ExtractionRun) == 0
     assert await _count(db, models.Commitment) == 0
     assert await _count(db, models.StatusEvent) == 0
     db.expire_all()
-    doc = await db.get(models.SourceDocument, stored_meeting.id)
+    doc = await db.get(models.SourceDocument, doc_id)
     assert doc.raw_text == ""
     assert doc.segments == []
     assert doc.removed_at is not None
 
     assert (await signed_in_client.get("/api/documents")).json() == []
-    assert (await signed_in_client.get(f"/api/documents/{stored_meeting.id}")).status_code == 404
+    assert (await signed_in_client.get(f"/api/documents/{doc_id}")).status_code == 404
 
     # A later sync offering the same meeting finds it already stored.
     _, created = await store_meeting(db, current_user, _fixture_input())
     assert created is False
 
-    assert (await signed_in_client.delete(f"/api/documents/{stored_meeting.id}")).status_code == 404
+    assert (await signed_in_client.delete(f"/api/documents/{doc_id}")).status_code == 404
 
 
 async def test_extract_on_removed_document_is_404(signed_in_client, stored_meeting, fake_extractor):
