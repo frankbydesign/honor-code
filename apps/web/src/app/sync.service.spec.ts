@@ -74,4 +74,35 @@ describe('SyncService', () => {
     expect(svc.error()).toContain('ANTHROPIC_API_KEY');
     expect(svc.syncing()).toBe(false);
   });
+
+  it('a failed check during a sync retries instead of freezing on "Syncing"', () => {
+    svc.syncNow();
+    http.expectOne({ method: 'POST', url: '/api/sync' }).flush({ run: { id: 'r1' } }, { status: 202, statusText: 'Accepted' });
+    http.expectOne({ method: 'GET', url: '/api/sync' }).flush(makeSyncStatus({ running: true }));
+
+    vi.advanceTimersByTime(2000);
+    http.expectOne({ method: 'GET', url: '/api/sync' }).flush({}, { status: 0, statusText: 'Unknown Error' });
+    expect(svc.syncing()).toBe(true);
+
+    vi.advanceTimersByTime(5000);
+    http.expectOne({ method: 'GET', url: '/api/sync' }).flush(makeSyncStatus({ running: false }));
+    expect(svc.syncing()).toBe(false);
+    expect(svc.finishedCount()).toBe(1);
+  });
+
+  it('notices a sync the app ran on its own schedule', () => {
+    const lastRun = (id: string) =>
+      makeSyncStatus({ last_run: { id, status: 'succeeded' } as never });
+    svc.refresh();
+    http.expectOne('/api/sync').flush(lastRun('r1'));
+    expect(svc.finishedCount()).toBe(0);
+
+    vi.advanceTimersByTime(60000);
+    http.expectOne('/api/sync').flush(lastRun('r1'));
+    expect(svc.finishedCount()).toBe(0);
+
+    vi.advanceTimersByTime(60000);
+    http.expectOne('/api/sync').flush(lastRun('r2'));
+    expect(svc.finishedCount()).toBe(1);
+  });
 });

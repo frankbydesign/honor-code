@@ -116,4 +116,12 @@ describe('CommitmentsService', () => {
     expect(svc.forTab('done').map((c) => c.id)).toEqual(['3']);
     expect(svc.forTab('closed').map((c) => c.id)).toEqual(['4', '5']);
   });
+
+  it('a refused edit (422) says the value was not accepted', () => {
+    svc.edit('c-1', { summary: 'x'.repeat(600) });
+    http
+      .expectOne('/api/commitments/c-1')
+      .flush({ detail: [{ msg: 'too long' }] }, { status: 422, statusText: 'Unprocessable Entity' });
+    expect(svc.itemError('c-1')).toBe('That value was not accepted; check that it is not empty or too long');
+  });
 });
