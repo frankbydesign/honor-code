@@ -99,7 +99,7 @@ async def test_get_unknown_document_is_404(signed_in_client):
 
 
 async def test_remove_document_leaves_tombstone(signed_in_client, current_user, db, stored_meeting, fake_extractor):
-    doc_id = stored_meeting.id  # read before expire_all() below
+    doc_id = stored_meeting.id
     fake_extractor.returns([candidate()])
     await signed_in_client.post(f"/api/documents/{doc_id}/extract")
 
@@ -109,7 +109,7 @@ async def test_remove_document_leaves_tombstone(signed_in_client, current_user, 
     assert await _count(db, models.ExtractionRun) == 0
     assert await _count(db, models.Commitment) == 0
     assert await _count(db, models.StatusEvent) == 0
-    db.expire_all()
+    db.expunge_all()  # fresh reads below; already-loaded fixtures stay usable
     doc = await db.get(models.SourceDocument, doc_id)
     assert doc.raw_text == ""
     assert doc.segments == []
