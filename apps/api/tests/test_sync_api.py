@@ -124,3 +124,40 @@ async def test_lifespan_starts_and_stops_scheduler_when_configured(monkeypatch):
         assert len(_scheduler_tasks()) == 1
     await asyncio.sleep(0)
     assert _scheduler_tasks() == []
+
+
+async def test_startup_marks_interrupted_runs_failed(db, monkeypatch):
+    """Rows left 'running' by a quit mid-sync or mid-extraction are closed at startup."""
+    from datetime import datetime, timezone
+
+    from app.db import models
+
+    monkeypatch.setenv("SYNC_ENABLED", "false")
+    started = datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
+    user = models.User(email="test@example.com")
+    db.add(user)
+    await db.flush()
+    doc = models.SourceDocument(
+        user_id=user.id, kind="fathom_meeting", external_id="1", title="t", occurred_at=started,
+        occurred_on=started.date(), raw_text="", segments=[], speakers=[], char_count=0,
+    )
+    db.add(doc)
+    await db.flush()
+    db.add(models.SyncRun(source="fathom", trigger="startup", status="running", window_start=started, started_at=started))
+    db.add(models.SyncRun(source="fathom", trigger="manual", status="succeeded", window_start=started,
+                          started_at=started, finished_at=started))
+    db.add(models.ExtractionRun(document_id=doc.id, status="running", model="m", prompt_version="v1", started_at=started))
+    await db.commit()
+
+    async with app.router.lifespan_context(app):
+        pass
+
+    db.expunge_all()
+    from sqlalchemy import select
+
+    syncs = {r.trigger: r for r in (await db.execute(select(models.SyncRun))).scalars()}
+    assert syncs["startup"].status == "failed" and syncs["startup"].error == "interrupted"
+    assert syncs["startup"].finished_at is not None
+    assert syncs["manual"].status == "succeeded" and syncs["manual"].error is None
+    run = (await db.execute(select(models.ExtractionRun))).scalar_one()
+    assert run.status == "failed" and run.error == "interrupted"
