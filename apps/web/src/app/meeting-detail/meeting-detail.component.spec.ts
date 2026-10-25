@@ -66,7 +66,7 @@ describe('MeetingDetailComponent', () => {
       .flush({ detail: 'extraction failed (RuntimeError)', run_id: 'run-2' }, { status: 502, statusText: 'Bad Gateway' });
     http.expectOne('/api/documents/doc-1').flush(makeDocumentDetail());
     fixture.detectChanges();
-    expect(el.querySelector('[role="alert"]')?.textContent).toContain('Extraction failed; see the meeting page for the run');
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain('Extraction failed; the runs list below shows why');
   });
 
   it('Remove asks for confirmation, then deletes and goes back to Meetings', async () => {
@@ -102,6 +102,18 @@ describe('MeetingDetailComponent', () => {
     fixture.detectChanges();
     http.expectOne('/api/documents/gone').flush({ detail: 'not found' }, { status: 404, statusText: 'Not Found' });
     fixture.detectChanges();
-    expect((fixture.nativeElement as HTMLElement).querySelector('[role="alert"]')).not.toBeNull();
+    expect((fixture.nativeElement as HTMLElement).querySelector('[role="alert"]')?.textContent).toContain(
+      'Not found; it may have been removed',
+    );
+  });
+
+  it('a move on this page updates the card from the answer, without waiting for a reload', async () => {
+    const fixture = await render();
+    const el = fixture.nativeElement as HTMLElement;
+    button(el, 'Accept')!.click();
+    http.expectOne('/api/commitments/c-1/status').flush(makeCommitment({ status: 'accepted' }));
+    fixture.detectChanges();
+    expect(button(el, 'Accept')).toBeUndefined();
+    expect(button(el, 'Done')).not.toBeUndefined();
   });
 });
