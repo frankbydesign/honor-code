@@ -46,3 +46,18 @@ def test_suite_ignores_exported_database_url(tmp_path: Path):
     rows = conn.execute("SELECT email FROM users").fetchall()
     conn.close()
     assert rows == [("keep@example.com",)], "the exported database was touched by the suite"
+
+
+async def test_network_guard_covers_every_http_library():
+    """Both HTTP stacks in the dependency tree refuse to leave the process."""
+    import httpx
+    import httpx2
+    import pytest
+
+    for lib in (httpx, httpx2):
+        with pytest.raises(RuntimeError, match="network call attempted in tests"):
+            async with lib.AsyncClient() as c:
+                await c.get("https://example.com/")
+        with pytest.raises(RuntimeError, match="network call attempted in tests"):
+            with lib.Client() as c:
+                c.get("https://example.com/")
