@@ -1,0 +1,21 @@
+{
+  "_comment": "Invented transcript. Shape follows GET /recordings/{id}/transcript.",
+  "transcript": [
+    {
+      "speaker": {
+        "display_name": "Kai Nakamura",
+        "matched_calendar_invitee_email": "kai@example.org"
+      },
+      "text": "Item 14 looks off in the export.",
+      "timestamp": "00:00:05"
+    },
+    {
+      "speaker": {
+        "display_name": "Frank Example",
+        "matched_calendar_invitee_email": "frank@example.com"
+      },
+      "text": "Let me compare it against the source file and get back to you Friday.",
+      "timestamp": "00:00:12"
+    }
+  ]
+}
