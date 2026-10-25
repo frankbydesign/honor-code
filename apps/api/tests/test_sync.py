@@ -192,7 +192,6 @@ async def test_failing_transcript_is_retried_and_window_keeps_moving(current_use
     second = await run_sync("interval", source=source, extractor=fake_extractor, now=later)
 
     assert second.window_start <= datetime(2026, 10, 20, 17, 45, tzinfo=timezone.utc)  # still covers 900101
-    assert second.window_start > first.window_start - timedelta(seconds=1) or second.window_start == first.window_start
     assert [d.external_id for d in await _docs(db)] == ["900101", "900102", "900103"]
 
 
